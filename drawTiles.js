@@ -258,11 +258,25 @@ function sketch(parent) { // we pass the sketch data from the parent
       pan = - data.zoom * instance.min(instance.width, instance.height) * data.pan;
 
       instance.push();
-      instance.background(0, 0, 0.2 * 255);
+      instance.background(248, 251, 242);
       instance.translate(instance.width / 2 + pan, instance.height / 2);
       instance.rotate(rotate);
 
-      for (let tile of Object.values(data.tiles)) {
+      // calculate minimum distance between neighbors
+      Object.values(data.tiles).forEach((tile) => {
+        let neighbors = Object.values(tile.neighbors);
+        let minDistance = Math.min(
+          Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][0].y, 2)),
+          Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][1].y, 2)),
+          Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][0].y, 2)),
+          Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][1].y, 2))
+        );
+        tile.minDistance = minDistance;
+      });
+
+      for (let tile of Object.values(data.tiles).sort((a, b) => {
+        return b.minDistance - a.minDistance;
+      })) {
 
         let tileIsSelected = false;
         if (data.selectedTiles.length > 0) {
@@ -319,12 +333,18 @@ function sketch(parent) { // we pass the sketch data from the parent
 
         }
 
+        instance.fill(`rgba(0, 0, 0, 1)`);
+        instance.ellipse(tile.mean.x * preFactor, tile.mean.y * preFactor, Math.pow(tile.minDistance * preFactor, 1.5) * 1);
+
+        /*
         instance.beginShape();
         for (let pt of tile.dualPts) {
           instance.vertex(preFactor * pt.x, preFactor * pt.y);
         }
         instance.endShape(instance.CLOSE);
+        */
       }
+      
 
       instance.pop();
     }

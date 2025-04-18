@@ -300,11 +300,12 @@ var app = new Vue({
 
       // calculate intersection points of lines on grid
       let pts = {};
+      let linepts = this.grid.map((line) => []);
 
       if (this.width && this.height) {
 
-        for (let line1 of this.grid) {
-          for (let line2 of this.grid) {
+        this.grid.forEach((line1, i) => {
+          this.grid.forEach((line2, j) => {
             if (line1.angle < line2.angle) {
 
               let sc1 = this.sinCosTable[line1.angle];
@@ -349,14 +350,26 @@ var app = new Vue({
                       pts[index].x = x;
                       pts[index].y = y;
                       pts[index].lines = [line1, line2];
+                      
+                      pts[index].neighbors = {[i]: [], [j]: []};
+                      pts[index].idx = index;
+                      linepts[i].push(pts[index]);
+                      linepts[j].push(pts[index]);
                     }
                   }
 
                 }
               }
             }
-          }
-        }
+          });
+        });
+        linepts.forEach((line, j) => {
+          line.sort((a,b)=>{if(a.y < b.y){ return -1};if(a.y > b.y){return 1};return 0}).forEach((ipt, i, ipts) => {
+           
+            pts[ipt.idx].neighbors[j].push({x: pts[ipts[Math.max(0, i-1)].idx].x, y: pts[ipts[Math.max(0, i-1)].idx].y}, {x: pts[ipts[Math.min(ipts.length-1, i+1)].idx].x, y: pts[ipts[Math.min(ipts.length-1, i+1)].idx].y});
+          })
+          
+        });
 
         // calculate dual points to intersection points
         for (let pt of Object.values(pts)) {
