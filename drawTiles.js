@@ -5,199 +5,222 @@ function sketch(parent) { // we pass the sketch data from the parent
   return function( p ) { // p could be any variable name
     // p5 sketch goes here
     let canvas;
-    let instancedShader;
+    let brightnessShader; // Renamed shader variable
     let gl; // WebGL rendering context
-    let instancingExt; // ANGLE_instanced_arrays extension
+    let floatTexturesExt; // OES_texture_float extension
 
-    // Base geometry for the circle
-    let circleVBO;          // Buffer for vertex positions (vec2)
-    let circleVertices = [];  // JS array for base circle vertices
-    const circleSegments = 32; // Number of vertices for the circle
+    // Geometry for a full-screen quad
+    let quadVBO;
+    const quadVertices = new Float32Array([
+      -1.0, -1.0,  // Bottom Left
+       1.0, -1.0,  // Bottom Right
+      -1.0,  1.0,  // Top Left
+       1.0,  1.0   // Top Right
+    ]);
 
-    // Instance data VBOs
-    let offsetVBO; // vec2 per instance (center position)
-    let radiusVBO; // float per instance
-    let colorVBO;  // vec3 per instance (color)
-
-    // Arrays to hold instance data before upload
-    let instanceOffsets = [];
-    let instanceRadii = [];
-    let instanceColors = [];
-    let instanceCount = 0;
+    // Data Textures
+    let tilePosTexture = null;
+    let tileDataTexture = null;
+    let tileCount = 0;
+    const MAX_TILES = 1024; // Max tiles supported by texture size (e.g., 32x32 = 1024)
+    const TEXTURE_SIZE = 32; // Texture dimensions (TEXTURE_SIZE x TEXTURE_SIZE)
+    let tilePositions = new Float32Array(MAX_TILES * 2); // Store XY
+    let tileDistances = new Float32Array(MAX_TILES * 1); // Store minDistance
 
     // Uniform locations
-    let uProjectionMatrixLoc;
-    let uModelViewMatrixLoc;
+    let uScreenSizeLoc;
+    let uTilePositionsLoc;
+    let uTileDataLoc;
+    let uTileCountLoc;
+    let uInterpolationPowerLoc;
 
-    // Helper to convert hex color to vec3 array [R, G, B] (0.0-1.0)
+    // Keep hexToRgbFloat for now, might be useful later? Or remove if unused.
     function hexToRgbFloat(hex) {
       var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
       return result ? [
         parseInt(result[1], 16) / 255.0,
         parseInt(result[2], 16) / 255.0,
         parseInt(result[3], 16) / 255.0,
-      ] : [0, 0, 0]; // Default to black if parse fails
+      ] : [0, 0, 0]; 
     }
 
-    // Function to create the base circle geometry
-    function createCircleGeometry() {
-      circleVertices = [];
-      // Center vertex for TRIANGLE_FAN
-      circleVertices.push(0, 0);
-      // Vertices around the circumference
-      for (let i = 0; i <= circleSegments; i++) {
-        let angle = (i / circleSegments) * p.TWO_PI;
-        circleVertices.push(Math.cos(angle), Math.sin(angle));
-      }
+    // Helper function to create a Float texture
+    function createFloatTexture(width, height) {
+        if (!floatTexturesExt) {
+            console.error("Float textures not supported/enabled!");
+            return null;
+        }
+        let texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        // Use RGBA format even for vec2/float to ensure broad compatibility, pack data accordingly
+        // Use NEAREST filtering and CLAMP_TO_EDGE wrap for data textures
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.FLOAT, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        return texture;
+    }
+    
+    // Function to update a Float texture with data
+    function updateFloatTexture(texture, width, height, data) {
+        if (!texture || !floatTexturesExt) return;
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        // Create a padded RGBA buffer from the source data
+        let paddedData = new Float32Array(width * height * 4);
+        if (data.length === width * height * 2) { // Assuming vec2 data (positions)
+             for (let i = 0; i < width * height; i++) {
+                 paddedData[i * 4 + 0] = data[i * 2 + 0]; // R = X
+                 paddedData[i * 4 + 1] = data[i * 2 + 1]; // G = Y
+                 // B, A are unused
+             }
+        } else if (data.length === width * height) { // Assuming float data (minDistance)
+             for (let i = 0; i < width * height; i++) {
+                 paddedData[i * 4 + 0] = data[i]; // R = minDistance
+                 // G, B, A are unused
+             }
+        } else {
+             console.error("Data size mismatch for texture update");
+             gl.bindTexture(gl.TEXTURE_2D, null);
+             return;
+        }
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.FLOAT, paddedData);
+        gl.bindTexture(gl.TEXTURE_2D, null);
     }
 
-    // Function to create and fill VBOs
+    // Function to create and fill VBOs (Quad only)
     function setupBuffers() {
-        gl = p.drawingContext; // Get the WebGL context
+        gl = p.drawingContext;
 
-        // --- Base Circle VBO --- 
-        circleVBO = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, circleVBO);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(circleVertices), gl.STATIC_DRAW);
-
-        // --- Instance Data VBOs --- 
-        offsetVBO = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, offsetVBO);
-        gl.bufferData(gl.ARRAY_BUFFER, 1024 * 2 * 4, gl.DYNAMIC_DRAW); 
-
-        radiusVBO = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, radiusVBO);
-        gl.bufferData(gl.ARRAY_BUFFER, 1024 * 1 * 4, gl.DYNAMIC_DRAW); 
-
-        colorVBO = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, colorVBO);
-        gl.bufferData(gl.ARRAY_BUFFER, 1024 * 3 * 4, gl.DYNAMIC_DRAW); 
+        // --- Quad VBO --- 
+        quadVBO = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+        gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
         
         gl.bindBuffer(gl.ARRAY_BUFFER, null); // Unbind
     }
     
-    // Function to get uniform locations (call after shader is loaded and applied)
+    // Function to get uniform locations
     function getUniformLocations() {
-        if (!instancedShader || !instancedShader._glProgram) {
+        if (!brightnessShader || !brightnessShader._glProgram) {
              console.error("Shader not ready for getting uniform locations.");
              return;
         }
-        let program = instancedShader._glProgram;
-        uProjectionMatrixLoc = gl.getUniformLocation(program, "uProjectionMatrix");
-        uModelViewMatrixLoc = gl.getUniformLocation(program, "uModelViewMatrix");
+        let program = brightnessShader._glProgram;
+        uScreenSizeLoc = gl.getUniformLocation(program, "uScreenSize");
+        uTilePositionsLoc = gl.getUniformLocation(program, "uTilePositions");
+        uTileDataLoc = gl.getUniformLocation(program, "uTileData");
+        uTileCountLoc = gl.getUniformLocation(program, "uTileCount");
+        uInterpolationPowerLoc = gl.getUniformLocation(program, "uInterpolationPower");
 
-        if (!uProjectionMatrixLoc || !uModelViewMatrixLoc) {
-             console.warn("Could not find matrix uniform locations. Check names in shader.");
+        if (!uScreenSizeLoc || !uTilePositionsLoc || !uTileDataLoc || !uTileCountLoc || !uInterpolationPowerLoc) {
+             console.warn("Could not find one or more uniform locations. Check shader names.");
         }
     }
 
-    // Function to setup vertex attributes
+    // Function to setup vertex attributes (Quad only)
     function setupAttributes() {
-        if (!instancingExt) { 
-            console.error("ANGLE_instanced_arrays extension not available for attribute setup.");
-            return;
-        }
-        let program = instancedShader._glProgram; 
+        let program = brightnessShader._glProgram; 
         if (!program) {
             console.error("Shader program not available for attribute setup.");
             return;
         }
 
         let aPositionLoc = gl.getAttribLocation(program, "aPosition");
-        let aInstanceOffsetLoc = gl.getAttribLocation(program, "aInstanceOffset");
-        let aInstanceRadiusLoc = gl.getAttribLocation(program, "aInstanceRadius");
-        let aInstanceColorLoc = gl.getAttribLocation(program, "aInstanceColor");
-
-        if (aPositionLoc === -1 || aInstanceOffsetLoc === -1 || aInstanceRadiusLoc === -1 || aInstanceColorLoc === -1) {
-             console.warn("One or more shader attributes not found.");
+        if (aPositionLoc === -1) {
+             console.warn("Shader attribute aPosition not found.");
         }
 
-        // --- Base Circle Attributes --- 
-        gl.bindBuffer(gl.ARRAY_BUFFER, circleVBO);
+        // --- Quad Attributes --- 
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
         gl.vertexAttribPointer(aPositionLoc, 2, gl.FLOAT, false, 0, 0); 
         gl.enableVertexAttribArray(aPositionLoc);
-
-        // --- Instance Attributes --- 
-        gl.bindBuffer(gl.ARRAY_BUFFER, offsetVBO);
-        gl.vertexAttribPointer(aInstanceOffsetLoc, 2, gl.FLOAT, false, 0, 0); 
-        gl.enableVertexAttribArray(aInstanceOffsetLoc);
-        instancingExt.vertexAttribDivisorANGLE(aInstanceOffsetLoc, 1); 
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, radiusVBO);
-        gl.vertexAttribPointer(aInstanceRadiusLoc, 1, gl.FLOAT, false, 0, 0); 
-        gl.enableVertexAttribArray(aInstanceRadiusLoc);
-        instancingExt.vertexAttribDivisorANGLE(aInstanceRadiusLoc, 1); 
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, colorVBO);
-        gl.vertexAttribPointer(aInstanceColorLoc, 3, gl.FLOAT, false, 0, 0); 
-        gl.enableVertexAttribArray(aInstanceColorLoc);
-        instancingExt.vertexAttribDivisorANGLE(aInstanceColorLoc, 1); 
-
+        
         gl.bindBuffer(gl.ARRAY_BUFFER, null); // Unbind
     }
 
-    // Function to prepare and upload instance data
-    function prepareInstanceData(data) {
-      instanceOffsets = [];
-      instanceRadii = [];
-      instanceColors = [];
-      instanceCount = 0;
+    // Function to prepare data and update textures
+    function prepareData(data) {
+      tileCount = 0;
+      
+      if (!data.tiles || Object.keys(data.tiles).length === 0 || !p.width || !p.height) {
+        tilePositions.fill(0);
+        tileDistances.fill(0);
+      } else {
+          let tiles = Object.values(data.tiles);
+          let preFactor = data.zoom * Math.min(p.width, p.height) / data.steps;
+          let panOffset = p.createVector(data.pan * data.steps * preFactor, 0);
+          let rotateRad = p.radians(data.rotate);
+          panOffset.rotate(rotateRad);
+          //let effectiveZoom = Math.max(0.01, data.zoom); // Not directly needed here?
+          
+          for (let i = 0; i < tiles.length && i < MAX_TILES; i++) {
+              let tile = tiles[i];
+              if (!tile.mean || !tile.neighbors) continue; 
 
-      if (!data.tiles || Object.keys(data.tiles).length === 0 || !p.width || !p.height || !data.colors) {
-        return; 
-      }
-      let tiles = Object.values(data.tiles);
-      let preFactor = data.zoom * Math.min(p.width, p.height) / data.steps;
-      let panOffset = p.createVector(data.pan * data.steps * preFactor, 0);
-      let rotateRad = p.radians(data.rotate);
-      panOffset.rotate(rotateRad);
-      let effectiveZoom = Math.max(0.01, data.zoom);
-
-      for (let tile of tiles) {
-        if (!tile.mean) continue; 
-        let screenX = tile.mean.x * preFactor;
-        let screenY = tile.mean.y * preFactor;
-        let rotatedX = screenX * Math.cos(rotateRad) - screenY * Math.sin(rotateRad) + panOffset.x;
-        let rotatedY = screenX * Math.sin(rotateRad) + screenY * Math.cos(rotateRad) + panOffset.y;
-        instanceOffsets.push(rotatedX, rotatedY);
-        
-        let neighbors = Object.values(tile.neighbors);
-        let minDistance = Math.min(
-          Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][0].y, 2)),
-          Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][1].y, 2)),
-          Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][0].y, 2)),
-          Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][1].y, 2))
-        );
-
-        let radius = Math.pow(minDistance * preFactor,data.dotSizePow) * data.dotSizeMult * effectiveZoom; 
-        instanceRadii.push(radius);
-        let colorVec = [0, 0, 0]; 
-        if (data.colorTiles && data.colors && data.colors.length > 0) {
-          const filterFunction = data.orientationColoring ? 
-              (c) => c.angles === tile.angles :
-              (c) => c.area === tile.area;
-          let colorData = data.colors.find(filterFunction);
-          if (colorData && colorData.fill) {
-            colorVec = hexToRgbFloat(colorData.fill);
+              // Calculate screen position (center of canvas is 0,0 for shader)
+              let worldX = tile.mean.x * preFactor;
+              let worldY = tile.mean.y * preFactor;
+              let rotatedX = worldX * Math.cos(rotateRad) - worldY * Math.sin(rotateRad) + panOffset.x;
+              let rotatedY = worldX * Math.sin(rotateRad) + worldY * Math.cos(rotateRad) + panOffset.y;
+              
+              // Convert to pixel coordinates (origin top-left for frag shader gl_FragCoord)
+              let screenX = rotatedX + p.width / 2;
+              let screenY = rotatedY + p.height / 2; 
+              
+              tilePositions[tileCount * 2 + 0] = screenX;
+              tilePositions[tileCount * 2 + 1] = screenY;
+              
+              // Calculate minDistance (raw value, shader will handle interpolation)
+              let neighbors = Object.values(tile.neighbors);
+              let minDistance = Infinity;
+              if (neighbors.length >= 2 && neighbors[0].length >=1 && neighbors[1].length >=1) { // Basic check
+                   // This calculation seems complex and potentially error-prone
+                   // Re-check the neighbor structure and intended calculation if issues arise
+                   try { 
+                        minDistance = Math.min(
+                            // Check all 4 corner combinations between the two neighbor points/structures
+                            Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][0].y, 2)),
+                            neighbors[1].length > 1 ? Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][1].y, 2)) : Infinity,
+                            neighbors[0].length > 1 ? Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][0].y, 2)) : Infinity,
+                            (neighbors[0].length > 1 && neighbors[1].length > 1) ? Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][1].y, 2)) : Infinity
+                        );
+                        // Scale minDistance by preFactor like the original radius calculation did?
+                        // Let's scale it here to potentially keep values in a more manageable range
+                        minDistance = Math.pow(minDistance * preFactor, data.dotSizePow) * data.dotSizeMult; 
+                   } catch(e) {
+                        console.error("Error calculating minDistance for tile:", tile, e);
+                        minDistance = 0; // Default on error
+                   }
+              } else {
+                   minDistance = 0; // Default if neighbors aren't as expected
+              }
+              
+              // TODO: Need to normalize or scale this minDistance appropriately 
+              //       before passing to shader, or handle normalization in shader.
+              //       For now, pass the scaled value. Consider its range.
+              tileDistances[tileCount] = minDistance; 
+              
+              tileCount++;
           }
-        }
-        instanceColors.push(...colorVec); 
-        instanceCount++;
+          // Zero out remaining slots if fewer than MAX_TILES
+          for (let i = tileCount; i < MAX_TILES; i++) {
+              tilePositions[i * 2 + 0] = 0;
+              tilePositions[i * 2 + 1] = 0;
+              tileDistances[i] = 0;
+          }
       }
 
-      if (instanceCount > 0 && gl) { // Ensure gl context exists
-           gl.bindBuffer(gl.ARRAY_BUFFER, offsetVBO);
-           gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(instanceOffsets), gl.DYNAMIC_DRAW); 
-           gl.bindBuffer(gl.ARRAY_BUFFER, radiusVBO);
-           gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(instanceRadii), gl.DYNAMIC_DRAW);
-           gl.bindBuffer(gl.ARRAY_BUFFER, colorVBO);
-           gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(instanceColors), gl.DYNAMIC_DRAW);
-           gl.bindBuffer(gl.ARRAY_BUFFER, null); 
+      // Update textures
+      if (gl && tilePosTexture && tileDataTexture) { 
+           updateFloatTexture(tilePosTexture, TEXTURE_SIZE, TEXTURE_SIZE, tilePositions);
+           updateFloatTexture(tileDataTexture, TEXTURE_SIZE, TEXTURE_SIZE, tileDistances);
       }
     }
 
     p.preload = function() {
-      instancedShader = p.loadShader("instancedTile.vert", "instancedTile.frag");
+      brightnessShader = p.loadShader("brightnessMap.vert", "brightnessMap.frag");
     }
 
     p.setup = function() {
@@ -214,109 +237,120 @@ function sketch(parent) { // we pass the sketch data from the parent
       
       gl = p.drawingContext; 
 
-      instancingExt = gl.getExtension("ANGLE_instanced_arrays");
-      if (!instancingExt) {
-          alert("WebGL Instancing not supported.");
-          console.error("ANGLE_instanced_arrays extension not supported.");
-          return; 
-      }
+      // Get float texture extension
+      floatTexturesExt = gl.getExtension('OES_texture_float');
+      if (!floatTexturesExt) {
+          alert("WebGL extension OES_texture_float not supported.");
+          console.error("OES_texture_float not supported. Cannot use float textures.");
+          // Potentially fall back to encoding floats in RGBA8 textures if needed
+      } 
 
-      createCircleGeometry();
-      setupBuffers(); 
-      p.shader(instancedShader); // Apply shader to link it and make program available
-      getUniformLocations(); // Get locations after shader is applied
-      setupAttributes(); 
+      setupBuffers(); // Setup quad buffer
       
-      prepareInstanceData(parent.data); 
+      // Create float textures
+      tilePosTexture = createFloatTexture(TEXTURE_SIZE, TEXTURE_SIZE);
+      tileDataTexture = createFloatTexture(TEXTURE_SIZE, TEXTURE_SIZE);
+      if (!tilePosTexture || !tileDataTexture) {
+           console.error("Failed to create float textures. Aborting setup.");
+           return; // Stop if textures couldn't be created
+      } 
+      
+      p.shader(brightnessShader); // Apply shader 
+      getUniformLocations(); // Get locations for new shader
+      setupAttributes(); // Setup quad attributes
+      
+      prepareData(parent.data); // Prepare initial data and textures
     };
 
     p.draw = function() {
       p.background(0); 
       
-      // Ensure p5 calculates its matrices (ortho or default camera)
-      p.ortho(); // Using ortho is explicit
+      let program = brightnessShader._glProgram;
+      gl.useProgram(program); // Ensure raw GL context uses the program
       
-      if (instanceCount > 0 && instancingExt) { 
-          let program = instancedShader._glProgram;
-          gl.useProgram(program); // Ensure raw GL context uses the program
-          
-          // --- Manually set matrix uniforms --- 
-          // Access internal p5 matrices (names might vary across p5 versions)
-          if (p._renderer && p._renderer.uPMatrix && p._renderer.uMVMatrix && uProjectionMatrixLoc && uModelViewMatrixLoc) {
-               gl.uniformMatrix4fv(uProjectionMatrixLoc, false, p._renderer.uPMatrix.mat4);
-               gl.uniformMatrix4fv(uModelViewMatrixLoc, false, p._renderer.uMVMatrix.mat4);
-          } else {
-               console.warn("Could not access p5 matrices or uniform locations to set them manually.");
-               // Fallback or error handling might be needed
-          }
-          // ------------------------------------
-
-          // Re-enable attributes before drawing (Might still be needed)
-           let aPositionLoc = gl.getAttribLocation(program, "aPosition");
-           let aInstanceOffsetLoc = gl.getAttribLocation(program, "aInstanceOffset");
-           let aInstanceRadiusLoc = gl.getAttribLocation(program, "aInstanceRadius");
-           let aInstanceColorLoc = gl.getAttribLocation(program, "aInstanceColor");
-
-          gl.bindBuffer(gl.ARRAY_BUFFER, circleVBO);
-          gl.vertexAttribPointer(aPositionLoc, 2, gl.FLOAT, false, 0, 0); 
-          gl.enableVertexAttribArray(aPositionLoc);
-
-          gl.bindBuffer(gl.ARRAY_BUFFER, offsetVBO);
-          gl.vertexAttribPointer(aInstanceOffsetLoc, 2, gl.FLOAT, false, 0, 0);
-          gl.enableVertexAttribArray(aInstanceOffsetLoc);
-          instancingExt.vertexAttribDivisorANGLE(aInstanceOffsetLoc, 1); 
-
-          gl.bindBuffer(gl.ARRAY_BUFFER, radiusVBO);
-          gl.vertexAttribPointer(aInstanceRadiusLoc, 1, gl.FLOAT, false, 0, 0);
-          gl.enableVertexAttribArray(aInstanceRadiusLoc);
-          instancingExt.vertexAttribDivisorANGLE(aInstanceRadiusLoc, 1); 
-          
-          gl.bindBuffer(gl.ARRAY_BUFFER, colorVBO);
-          gl.vertexAttribPointer(aInstanceColorLoc, 3, gl.FLOAT, false, 0, 0);
-          gl.enableVertexAttribArray(aInstanceColorLoc);
-          instancingExt.vertexAttribDivisorANGLE(aInstanceColorLoc, 1); 
-
-          // Make the instanced draw call
-          instancingExt.drawArraysInstancedANGLE(gl.TRIANGLE_FAN, 0, circleSegments + 2, instanceCount);
-
-          // Disable instance arrays after use (good practice)
-          instancingExt.vertexAttribDivisorANGLE(aInstanceOffsetLoc, 0);
-          instancingExt.vertexAttribDivisorANGLE(aInstanceRadiusLoc, 0);
-          instancingExt.vertexAttribDivisorANGLE(aInstanceColorLoc, 0);
-          gl.bindBuffer(gl.ARRAY_BUFFER, null);
-
-          p.resetShader(); // Let p5 reset its state
+      // --- Set Uniforms ---
+      if (uScreenSizeLoc) {
+          gl.uniform2f(uScreenSizeLoc, p.width, p.height);
       }
+      if (uTileCountLoc) {
+           gl.uniform1i(uTileCountLoc, tileCount); 
+      }
+      if (uInterpolationPowerLoc) {
+           // Make this controllable via parent.data later? 
+           gl.uniform1f(uInterpolationPowerLoc, 2.0); // Default power of 2
+      }
+      
+      // Bind textures
+      if (uTilePositionsLoc && tilePosTexture) {
+          gl.activeTexture(gl.TEXTURE0); // Activate texture unit 0
+          gl.bindTexture(gl.TEXTURE_2D, tilePosTexture);
+          gl.uniform1i(uTilePositionsLoc, 0); // Tell shader sampler to use texture unit 0
+      }
+      if (uTileDataLoc && tileDataTexture) {
+          gl.activeTexture(gl.TEXTURE1); // Activate texture unit 1
+          gl.bindTexture(gl.TEXTURE_2D, tileDataTexture);
+          gl.uniform1i(uTileDataLoc, 1); // Tell shader sampler to use texture unit 1
+      }
+
+      // --- Bind Attributes ---
+      let aPositionLoc = gl.getAttribLocation(program, "aPosition");
+      if (aPositionLoc !== -1) {
+           gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+           gl.vertexAttribPointer(aPositionLoc, 2, gl.FLOAT, false, 0, 0); 
+           gl.enableVertexAttribArray(aPositionLoc);
+      } else {
+           console.error("aPosition attribute location invalid in draw loop.");
+           return; // Don't draw if attribute isn't found
+      }
+      
+      // --- Draw the Quad ---
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); // Draw the 4 vertices of the quad
+
+      // --- Clean up ---
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+      gl.activeTexture(gl.TEXTURE0); // Unbind textures (optional but good practice)
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, null);
     };
     
-    // --- dataChanged and Mouse Interaction Logic (keep as is) ---
-     p.dataChanged = function(data, oldData) {
+    // --- dataChanged and Mouse Interaction Logic ---
+    p.dataChanged = function(data, oldData) {
        if (!canvas || !gl) return; 
+       
+       // Resize logic
        if (data.display == 'none' || parent.$el.parentElement.clientWidth !== p.width || parent.$el.parentElement.clientHeight !== p.height) {
           let target = parent.$el.parentElement;
           let newWidth = target.clientWidth;
           let newHeight = target.clientHeight;
           if (newWidth > 0 && newHeight > 0) {
              p.resizeCanvas(newWidth, newHeight);
+             p.shader(brightnessShader); 
+             getUniformLocations(); 
+             setupAttributes(); 
              parent.$emit('update:resize-completed'); 
              parent.$emit('update:width', newWidth); 
              parent.$emit('update:height', newHeight); 
           }
        }
-       prepareInstanceData(data);
-       if (data.download > oldData.download) {
-          console.warn("SVG Download is not supported in instanced WebGL mode.");
-       }
+       
+       prepareData(data); 
      };
 
+    // Mouse interaction logic (getSelectedTile, mouseDragged, etc.)
+    // can be kept for potential future use (e.g., clicking to see brightness value)
+    // or removed if definitely not needed. Let's keep it for now.
+    
+    // --- Helper functions for mouse interaction (Keep for now) ---
     function whichSide(xp, yp, x1, y1, x2, y2) {
       return Math.sign((yp - y1) * (x2 -x1) - (xp - x1) * (y2 - y1));
     }
     
     function tileToString(tile) {
-      return JSON.stringify({
-        x: tile.x,
-        y: tile.y
+      // Need to ensure tile object structure is consistent if this is used
+      return JSON.stringify({ 
+        x: tile && tile.mean ? tile.mean.x : undefined, 
+        y: tile && tile.mean ? tile.mean.y : undefined
       });
     }
     
@@ -328,44 +362,13 @@ function sketch(parent) { // we pass the sketch data from the parent
     let prevY = 0;
 
      function getSelectedTile(mouseX_canvas, mouseY_canvas) {
-       if (!parent.data.tiles || Object.keys(parent.data.tiles).length === 0 || !p.width || !p.height) {
-         return {};
-       }
-       let mouseX_world = mouseX_canvas - p.width / 2;
-       let mouseY_world = mouseY_canvas - p.height / 2;
-       let preFactor = parent.data.zoom * Math.min(p.width, p.height) / parent.data.steps;
-       let panOffset = p.createVector(parent.data.pan * parent.data.steps * preFactor, 0);
-       let rotateRad = p.radians(parent.data.rotate);
-       panOffset.rotate(rotateRad);
-       let unPannedX = mouseX_world - panOffset.x;
-       let unPannedY = mouseY_world - panOffset.y;
-       let unRotatedX = unPannedX * Math.cos(-rotateRad) - unPannedY * Math.sin(-rotateRad);
-       let unRotatedY = unPannedX * Math.sin(-rotateRad) + unPannedY * Math.cos(-rotateRad);
-       let x_tileSpace = unRotatedX / preFactor;
-       let y_tileSpace = unRotatedY / preFactor;
- 
-       let mySelectedTile = {};
-       let min_dist_sq = Infinity;
-       
-       for (let tile of Object.values(parent.data.tiles)) {
-         if (tile && tile.mean) {
-           let dist_sq = Math.pow(x_tileSpace - tile.mean.x, 2) + Math.pow(y_tileSpace - tile.mean.y, 2);
-           let effectiveZoom = Math.max(0.01, parent.data.zoom); 
-           let baseRadius = parent.data.dotSizeMult * Math.pow(effectiveZoom, parent.data.dotSizePow) * (preFactor / 5.0);
-           let radius_tileSpace = baseRadius / preFactor; 
-           
-           if (dist_sq < Math.pow(radius_tileSpace, 2)) { 
-               if (dist_sq < min_dist_sq) { 
-                   min_dist_sq = dist_sq;
-                   mySelectedTile = tile;
-               }
-           }
-         }
-       }
-       return mySelectedTile;
+       // Disabled for now
+       return {}; 
      }
  
      p.mouseDragged = function() {
+       // Disabled for now 
+       /*
        if (p.mouseX > 0 && p.mouseX < p.width && p.mouseY > 0 && p.mouseY < p.height) {
          recentHover = true; 
          selectedTile = getSelectedTile(p.mouseX, p.mouseY); 
@@ -374,31 +377,17 @@ function sketch(parent) { // we pass the sketch data from the parent
            if (!recentlySelectedTiles.includes(tileString)) {
              updateSelectedTiles(selectedTile, adding); 
              recentlySelectedTiles.push(tileString);
-           }            
+           }           
          } 
-         let mouseDistance = p.dist(p.mouseX, p.mouseY, prevX, prevY);
-         let preFactor = parent.data.zoom * Math.min(p.width, p.height) / parent.data.steps; 
-         let stepSize = p.max(1, preFactor/10); 
-         if (mouseDistance > stepSize) {
-            for (let i = 0; i <= mouseDistance; i += stepSize) {
-               let cursorX = p.map(i, 0, mouseDistance, p.mouseX, prevX, true);
-               let cursorY = p.map(i, 0, mouseDistance, p.mouseY, prevY, true);
-               let intermediateTile = getSelectedTile(cursorX, cursorY);
-               if (Object.keys(intermediateTile).length > 0) {
-                 let tileString = tileToString(intermediateTile);
-                 if (!recentlySelectedTiles.includes(tileString)) {
-                   updateSelectedTiles(intermediateTile, adding);
-                   recentlySelectedTiles.push(tileString);
-                 }            
-               }
-             }
-           }
          prevX = p.mouseX;
          prevY = p.mouseY;
        }
+       */
      }
  
      p.mouseMoved = function() {
+       // Disabled for now
+       /*
        if (p.mouseX > 0 && p.mouseX < p.width && p.mouseY > 0 && p.mouseY < p.height) {
          recentHover = true;
          selectedTile = getSelectedTile(p.mouseX, p.mouseY); 
@@ -408,35 +397,45 @@ function sketch(parent) { // we pass the sketch data from the parent
          recentHover = false;
          selectedTile = {}; 
        }
+       */
      };
  
      p.mousePressed = function() {
+       // Disabled for now
+       /*
        if (p.mouseX > 0 && p.mouseX < p.width && p.mouseY > 0 && p.mouseY < p.height) {
          selectedTile = getSelectedTile(p.mouseX, p.mouseY);
          if (Object.keys(selectedTile).length > 0) {
            let tileString = tileToString(selectedTile);
-           let index = parent.data.selectedTiles.findIndex(e => e.x == selectedTile.x && e.y == selectedTile.y);
+           let index = parent.data.selectedTiles.findIndex(t => t && selectedTile.mean && t.x === selectedTile.mean.x && t.y === selectedTile.mean.y);
            adding = index < 0; 
            if (!recentlySelectedTiles.includes(tileString)) {
              updateSelectedTiles(selectedTile, adding);
              recentlySelectedTiles.push(tileString);
-           }            
+           }           
          } 
          prevX = p.mouseX;
          prevY = p.mouseY;
        }
+       */
      };
  
      p.mouseReleased = function() {
+       // Still relevant to clear this array
        recentlySelectedTiles = [];
      };
  
+     // This function might need updating based on how selected tiles are identified/stored
      function updateSelectedTiles(tile, addMode) {
+       // Disabled for now
+       /*
+       let tileData = tile.mean ? { x: tile.mean.x, y: tile.mean.y, ...tile } : tile; 
        if (addMode) {
-         parent.$emit('update:add-tile', tile);
+         parent.$emit('update:add-tile', tileData);
        } else {
-         parent.$emit('update:remove-tile', tile); 
+         parent.$emit('update:remove-tile', tileData); 
        }
+       */
      }
 
   };
