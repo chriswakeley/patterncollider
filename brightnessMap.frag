@@ -15,8 +15,8 @@ uniform vec2 uScreenSize;         // Canvas dimensions in pixels
 uniform float uInterpolationPower;  // Power for inverse distance weighting (e.g., 2.0)
 
 // Constants
-const float EPSILON = 1e-4; // Small value to avoid division by zero
-const float TEXTURE_SIZE = 32.0; // Must match JS: Texture dimensions (TEXTURE_SIZE x TEXTURE_SIZE)
+const float EPSILON = 1e-60; // Small value to avoid division by zero
+const float TEXTURE_SIZE = 64.0; // Must match JS: Texture dimensions (TEXTURE_SIZE x TEXTURE_SIZE)
 const float MAX_BRIGHTNESS_CLAMP = 50.0; // Clamp max brightness to avoid extreme values
 
 // Helper function to get texture coordinates for 1D index in 2D texture
@@ -37,7 +37,7 @@ void main() {
   float totalBrightness = 0.0;
   float maxTileCount = min(float(uTileCount), TEXTURE_SIZE * TEXTURE_SIZE); // Ensure we don't exceed texture bounds
 
-  for (int i = 0; i < 1024; i++) { // Max iterations based on TEXTURE_SIZE*TEXTURE_SIZE
+  for (int i = 0; i < 4096; i++) { // Max iterations based on TEXTURE_SIZE*TEXTURE_SIZE
       if (i >= uTileCount) {
           break; // Exit loop if we've processed all active tiles
       }
@@ -62,7 +62,8 @@ void main() {
       
       // Inverse distance weighting
       // Clamp distance to avoid extremely large weights near centers
-      float weight = 1.0 / pow(max(dist, 1.0), uInterpolationPower);
+      //float weight = 1.0 / pow(max(dist, 1.0), uInterpolationPower);
+      float weight = 1.0 / pow(dist, uInterpolationPower);
       
       totalBrightness += weight * tileBrightness;
       totalWeight += weight;

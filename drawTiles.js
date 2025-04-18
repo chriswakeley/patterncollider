@@ -22,8 +22,8 @@ function sketch(parent) { // we pass the sketch data from the parent
     let tilePosTexture = null;
     let tileDataTexture = null;
     let tileCount = 0;
-    const MAX_TILES = 1024; // Max tiles supported by texture size (e.g., 32x32 = 1024)
-    const TEXTURE_SIZE = 32; // Texture dimensions (TEXTURE_SIZE x TEXTURE_SIZE)
+    const MAX_TILES = 4096; // Max tiles supported by texture size (e.g., 32x32 = 1024)
+    const TEXTURE_SIZE = 64; // Texture dimensions (TEXTURE_SIZE x TEXTURE_SIZE)
     let tilePositions = new Float32Array(MAX_TILES * 2); // Store XY
     let tileDistances = new Float32Array(MAX_TILES * 1); // Store minDistance
 
@@ -188,13 +188,14 @@ function sketch(parent) { // we pass the sketch data from the parent
                         );
                         // Scale minDistance by preFactor like the original radius calculation did?
                         // Let's scale it here to potentially keep values in a more manageable range
-                        minDistance = Math.pow(minDistance * preFactor, data.dotSizePow) * data.dotSizeMult; 
+                        minDistance = Math.pow((minDistance) * preFactor, data.dotSizePow) * data.dotSizeMult; 
                    } catch(e) {
                         console.error("Error calculating minDistance for tile:", tile, e);
                         minDistance = 0; // Default on error
                    }
               } else {
                    minDistance = 0; // Default if neighbors aren't as expected
+                   console.log("No neighbors found for tile:", tile);
               }
               
               // TODO: Need to normalize or scale this minDistance appropriately 
@@ -277,7 +278,7 @@ function sketch(parent) { // we pass the sketch data from the parent
       }
       if (uInterpolationPowerLoc) {
            // Make this controllable via parent.data later? 
-           gl.uniform1f(uInterpolationPowerLoc, 2.0); // Default power of 2
+           gl.uniform1f(uInterpolationPowerLoc, 0.8); // Default power of 2
       }
       
       // Bind textures
