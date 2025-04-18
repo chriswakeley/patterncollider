@@ -336,19 +336,21 @@ var app = new Vue({
                                        || this.dist(x,y,0,0) <= 0.5 * (this.steps - 1)) {
                     let index = JSON.stringify([this.approx(x), this.approx(y)]);
                     if (pts[index]) {
-                      if (!pts[index].lines.includes(line1)) {
-                        pts[index].lines.push(line1);
-                      }
-                      if (!pts[index].lines.includes(line2)) {
-                        pts[index].lines.push(line2);
-                      }
+                      // Add lines if not already present (handles >2 lines intersecting)
+                      let line1Index = pts[index].lines.findIndex(l => l.angle === line1.angle && l.index === line1.index);
+                      if(line1Index === -1) pts[index].lines.push(line1);
+                      let line2Index = pts[index].lines.findIndex(l => l.angle === line2.angle && l.index === line2.index);
+                      if(line2Index === -1) pts[index].lines.push(line2);
                     } else {
                       pts[index] = {};
                       pts[index].x = x;
                       pts[index].y = y;
                       pts[index].lines = [line1, line2];
+                      //line1.pts.push([y, index]);
                       
                       pts[index].neighbors = {[i]: [], [j]: []};
+                      //pts[index].neighbors = [[], []];
+                      
                       pts[index].idx = index;
                       linepts[i].push(pts[index]);
                       linepts[j].push(pts[index]);
@@ -360,6 +362,8 @@ var app = new Vue({
             }
           });
         });
+        
+        // Calculate Neighbors
         linepts.forEach((line, j) => {
           line.sort((a,b)=>{if(a.y < b.y){ return -1};if(a.y > b.y){return 1};return 0}).forEach((ipt, i, ipts) => {
            
@@ -368,10 +372,38 @@ var app = new Vue({
           
         });
 
-        // calculate dual points to intersection points
+        // Calculate minDist and dual points
         for (let pt of Object.values(pts)) {
+            
+           // --- Calculate minDist --- 
+           let minDistSq = Infinity;
+           let neighborLines = Object.values(pt.neighbors || {}); // Get arrays of neighbors for each line
+           
+           if (neighborLines.length >= 2) { // Need neighbors from at least two lines
+                // Iterate through all pairs of neighbors from different lines
+                // This logic assumes neighbors array holds coordinates {x, y}
+                for(let neighbor1 of (neighborLines[0] || [])) {
+                    for (let neighbor2 of (neighborLines[1] || [])) {
+                        let dx = neighbor1.x - neighbor2.x;
+                        let dy = neighbor1.y - neighbor2.y;
+                        let distSq = dx*dx + dy*dy;
+                        minDistSq = Math.min(minDistSq, distSq);
+                    }
+                }
+                // Handle cases with > 2 intersecting lines if necessary, comparing neighbors from all pairs?
+                // For simplicity, let's assume the first two neighbor lists are sufficient for a basic minDist.
+           } else if (neighborLines.length === 1 && (neighborLines[0] || []).length >= 2) {
+               // If only one line has neighbors (e.g., endpoint on edge), use dist between those two.
+               let neighborsOnLine = neighborLines[0];
+                let dx = neighborsOnLine[0].x - neighborsOnLine[1].x;
+                let dy = neighborsOnLine[0].y - neighborsOnLine[1].y;
+                minDistSq = dx*dx + dy*dy;
+           } // else: not enough neighbors to calculate a meaningful distance
+           
+           pt.minDist = minDistSq === Infinity ? 0 : Math.sqrt(minDistSq);
+           // -------------------------
 
-          // sort angles of all edges that meet at an intersection point
+          // calculate sort angles of all edges that meet at an intersection point
           let angles = pt.lines.map(e => e.angle * this.multiplier);
           let angles2 = angles.map(e => (e + Math.PI) % (2 * Math.PI));
           // numerical sort angles and remove duplicates (e.g. due to degeneracy when phase = 0)

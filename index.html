@@ -88,8 +88,8 @@
           rotate: rotate,
           orientationColoring: orientationColoring,
           download: tilingDownloadCount,
-          dotSizeMult: dotSizeMult,
-          dotSizePow: dotSizePow
+          dot_mult: dotSizeMult,
+          dot_pow: dotSizePow
         }"
         v-on:update:add-tile="selectedTiles = [...selectedTiles, $event]"
         v-on:update:remove-tile="selectedTiles = selectedTiles.filter(e => !(e.x == $event.x && e.y == $event.y))"
