@@ -64,36 +64,7 @@
 
   <main>
 
-    <div class="half"  :style="{display: show.toLowerCase().includes('grid') ? 'flex' : 'none'}">
-      <div>
-        Grid
-        <button title="Download Grid Image" class="save" @click="gridDownloadCount++">💾</button>
-      </div>
-      <div class="stretch">
-        <p5 src="./drawGrid.js"
-        :style="{display: canvasDisplaySetting}"
-        :data="{
-          grid: grid,
-          multiplier: multiplier,
-          spacing: spacing,
-          intersectionPoints: intersectionPoints,
-          showIntersections: showIntersections,
-          selectedLines: selectedLines,
-          selectedTiles: selectedTiles,
-          display: canvasDisplaySetting,
-          rotate: rotate,
-          download: gridDownloadCount
-        }"
-        v-on:update:add-line="selectedLines = [...selectedLines, $event]"
-        v-on:update:remove-line="selectedLines = selectedLines.filter(e => !(e.angle == $event.angle && e.index == $event.index))"
-        v-on:update:resize-completed="canvas1Resized = true"
-        v-on:update:width="if ($event) {width = $event}"
-        v-on:update:height="if ($event) {height = $event}"
-        ></p5>
-      </div>
-    </div>
-
-    <div class="half"  :style="{display: show.toLowerCase().includes('tiling') ? 'flex': 'none'}">
+    <div class="half" :style="{display: 'flex', width: '100%'}">
       <div>
         Tiling
         <button title="Download Tiling Image" class="save" @click="tilingDownloadCount++">💾</button>
@@ -109,7 +80,6 @@
           zoom: zoom,
           colorTiles: colorTiles,
           colors: colorPalette,
-          selectedLines: selectedLines,
           selectedTiles: selectedTiles,
           display: canvasDisplaySetting,
           symmetry: symmetry,
@@ -131,7 +101,7 @@
     </div>
 
     <div class="bottomrightcorner">
-        <button @click="clearSelection" v-if="selectedTiles.length > 0 || selectedLines.length > 0">Clear Selection</button>
+        <button @click="clearSelection" v-if="selectedTiles.length > 0">Clear Selection</button>
         <button @click="reset" v-if="queryURL.length > 0">Reset</button>
     </div>
 
@@ -207,9 +177,7 @@
       <div style="flex-direction: row; width: auto;">
         <label for="show">Show</label> &nbsp;&nbsp;       
         <select id="show" v-model="show">
-          <option>Grid & Tiling</option>
           <option>Tiling</option>
-          <option>Grid</option>
         </select>
       </div>
 

@@ -114,7 +114,6 @@ var app = new Vue({
     },
 
     clearSelection() {
-      this.selectedLines = [];
       this.selectedTiles = [];
     },
 
@@ -128,7 +127,6 @@ var app = new Vue({
     },
 
     onResize() {
-      this.canvas1Resized = false;
       this.canvas2Resized = false;
     },
 
@@ -151,7 +149,6 @@ var app = new Vue({
     },
 
     resetSelection() {
-      this.selectedLines = [];
       this.selectedTiles = [];
     },
 
@@ -509,7 +506,7 @@ var app = new Vue({
     },
 
     canvasDisplaySetting() {
-      if (this.canvas1Resized && this.canvas2Resized) {
+      if (this.canvas2Resized) {
         return '';
       } else {
         return 'none';
@@ -544,35 +541,34 @@ var app = new Vue({
   watch: {
 
     symmetry() {
-      this.resetSelection();
+      this.selectedTiles = [];
     },
 
     pattern() {
-      this.resetSelection();
+      this.selectedTiles = [];
     },
 
     radius() {
-      this.resetSelection();      
+      this.selectedTiles = [];      
     },
 
     rotate() {
-      this.resetSelection();      
+      this.selectedTiles = [];      
     },
 
     pan() {
-      this.resetSelection();      
+      this.selectedTiles = [];      
     },
 
     disorder() {
-      this.resetSelection();
+      this.selectedTiles = [];
     },
 
     randomSeed() {
-      this.resetSelection();
+      this.selectedTiles = [];
     },
 
     show() {
-      this.canvas1Resized = false;
       this.canvas2Resized = false;
     },
 
@@ -599,20 +595,17 @@ var app = new Vue({
     window.addEventListener("resize", this.onResize);
 
     setTimeout(() => {
-      context.canvas1Resized = false;
       context.canvas2Resized = false;
     }, 500);
 
 
     window.addEventListener("fullscreenchange", e => {
       context.fullscreen = document.fullscreen;
-      context.canvas1Resized = false;
       context.canvas2Resized = false;
     });
 
     window.addEventListener("webkitfullscreenchange", e => {
       context.fullscreen = document.webkitCurrentFullScreenElement;
-      context.canvas1Resized = false;
       context.canvas2Resized = false;
     });
 
@@ -639,17 +632,13 @@ var app = new Vue({
     contrast: 36,
     sat: 74,
     reverseColors: false,
-    show: 'Grid & Tiling',
-    tiles: [],
-    selectedLines: [],
+    show: 'Tiling',
     selectedTiles: [],
     epsilon: Math.pow(10, -6),
     inverseEpsilon: Math.pow(10, 6),
-    canvas1Resized: false,
     canvas2Resized: false,
     width: 0,
     height: 0,
-    gridDownloadCount: 0,
     tilingDownloadCount: 0,
     mode: 'shape',
     fullscreen: false,
