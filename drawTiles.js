@@ -9,11 +9,11 @@ function sketch(parent) { // we pass the sketch data from the parent
     let gl; // WebGL rendering context
     
     // Graphics objects / Framebuffers
-    let initialDistFieldTex; // 2D Graphics to draw initial points
-    // let pingPongTexA;        // WEBGL Graphics for blurring (REMOVED)
-    // let pingPongTexB;        // WEBGL Graphics for blurring (REMOVED)
-    let tempBufferA;         // 2D Graphics for temp blur storage
-    let tempBufferB;         // 2D Graphics for temp blur storage
+    // let initialDistFieldTex; // REMOVED - Not strictly needed for RBF only
+    // let tileDataTex;         // REMOVED - Using raw WebGL texture now
+    let tileDataTextureObject = null; // Will hold the WebGL texture object
+    let tileDataFloatArray = null;  // Will hold the JS float array
+    let tileDataTexSize = 32; // Size of the data texture (32x32 = 1024)
     let brightness_premult = 100;
     
     let needsDataTextureUpdate = true; // Flag to rebuild initial texture
@@ -31,47 +31,39 @@ function sketch(parent) { // we pass the sketch data from the parent
 
     // Function to prepare the initial texture with distance data
     function prepareInitialDataTexture(data) {
-      if (!data.tiles || Object.keys(data.tiles).length === 0 || !initialDistFieldTex) {
-        if(initialDistFieldTex) initialDistFieldTex.background(0); // Clear if exists
+      if (!data.tiles || Object.keys(data.tiles).length === 0 || !tileDataTextureObject) {
+        // Optional: Clear texture if needed? Or just let new data overwrite?
+        console.warn("prepareInitialDataTexture called but tiles or texture object missing");
         return; // Not ready yet
       }
 
       let tiles = Object.values(data.tiles);
       
-      // --- REMOVED: Find actual max minDist --- 
-      /*
-      maxObservedDist = 0; 
-      for (let tile of tiles) {
-          if (tile && typeof tile.minDist !== 'undefined') {
-              maxObservedDist = Math.max(maxObservedDist, tile.minDist);
-          }
-      }
-      // Use the observed max, or 1.0 if none found (avoid division by zero)
-      let normalizationMax = (maxObservedDist > 0) ? maxObservedDist : 1.0;
-      */
-      // -----------------------------
-      
-      initialDistFieldTex.push(); // Use push/pop for 2D graphics state
-      initialDistFieldTex.background(0, 0, 0, 0); 
-      initialDistFieldTex.noStroke();
-      
+      let tileCount = 0;
+      const MAX_TILES_FOR_SHADER = tileDataTexSize * tileDataTexSize; 
+      const textureDataSize = MAX_TILES_FOR_SHADER * 4; // 4 components (RGBA) per tile
+      tileDataFloatArray = new Float32Array(textureDataSize);
+
       // Pre-calculate transform factors
       let preFactor = data.zoom * Math.min(p.width, p.height) / data.steps;
       let panOffset = p.createVector(data.pan * data.steps * preFactor, 0);
       let rotateRad = p.radians(data.rotate);
       panOffset.rotate(rotateRad);
       
-      // Map tile centers and draw distance values
-      let logCount = 0; // Add a counter for logging
       for (let tile of tiles) {
-        if (!tile.mean) continue;
+        if (!tile.mean || tileCount >= MAX_TILES_FOR_SHADER) continue;
+        
         let neighbors = Object.values(tile.neighbors);
-        let minDistance = Math.min(
-          Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][0].y, 2)),
-          Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][1].y, 2)),
-          Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][0].y, 2)),
-          Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][1].y, 2))
-        ); 
+        // Basic minDist calculation (consider improving robustness later)
+        let minDistance = 0;
+        if (neighbors.length >= 2 && neighbors[0]?.length >=2 && neighbors[1]?.length >= 2) {
+             minDistance = Math.min(
+              p.dist(neighbors[0][0].x, neighbors[0][0].y, neighbors[1][0].x, neighbors[1][0].y),
+              p.dist(neighbors[0][0].x, neighbors[0][0].y, neighbors[1][1].x, neighbors[1][1].y),
+              p.dist(neighbors[0][1].x, neighbors[0][1].y, neighbors[1][0].x, neighbors[1][0].y),
+              p.dist(neighbors[0][1].x, neighbors[0][1].y, neighbors[1][1].x, neighbors[1][1].y)
+            );
+        } // Add handling for fewer neighbors if needed
 
         // Calculate screen position (center 0,0)
         let screenX = tile.mean.x * preFactor;
@@ -79,43 +71,49 @@ function sketch(parent) { // we pass the sketch data from the parent
         let rotatedX = screenX * Math.cos(rotateRad) - screenY * Math.sin(rotateRad) + panOffset.x;
         let rotatedY = screenX * Math.sin(rotateRad) + screenY * Math.cos(rotateRad) + panOffset.y;
 
-        // Map screen position (center 0,0) to texture coordinates (top-left 0,0)
-        let texX = p.map(rotatedX, -p.width / 2, p.width / 2, 0, initialDistFieldTex.width, true); // Clamp values
-        let texY = p.map(rotatedY, -p.height / 2, p.height / 2, 0, initialDistFieldTex.height, true);
+        // Map screen position to Normalized Coords (0-1 for texture encoding)
+        let normX = p.map(rotatedX, -p.width / 2, p.width / 2, 0, 1, true); 
+        let normY = p.map(rotatedY, -p.height / 2, p.height / 2, 0, 1, true);
 
-        // --- Apply Power/Multiplier and Clamp (Restored) --- 
+        // --- Apply Power/Multiplier --- 
         let rawValue = minDistance;
-        console.log("minDistance", minDistance);
-        // Revert to accessing from parent.data initially
         let powValue = (typeof parent.data.dot_pow === 'number' && !isNaN(parent.data.dot_pow)) ? parent.data.dot_pow : 1.0;
         let multValue = (typeof parent.data.dot_mult === 'number' && !isNaN(parent.data.dot_mult)) ? parent.data.dot_mult : 1.0;
-        // console.log(`prepareInitialDataTexture: parent has dot_pow? ${parent.hasOwnProperty('dot_pow')}, dot_mult? ${parent.hasOwnProperty('dot_mult')}. Using pow=${powValue}, mult=${multValue}`); // REMOVE DEBUG
         let processedValue = 0;
-        if (typeof rawValue === 'number' && !isNaN(rawValue) && rawValue >= 0) { // Check if rawValue is valid
-           processedValue = Math.pow(rawValue * brightness_premult, powValue) * multValue; // Apply pow and mult
-        } else {
-            // console.warn("Invalid tile.minDist encountered:", rawValue); // Log invalid minDist - Optional
-        }
-        let encodedVal = p.constrain(Math.floor(processedValue), 0, 255); // Clamp to 0-255
-        // ----------------------------------------
-        
-        // --- Logging (Optional) --- 
-        /*
-        if (logCount < 10) { 
-            console.log(`Tile ${logCount}: minDist=${rawValue?.toFixed(3)}, pow=${powValue}, mult=${multValue}, processed=${processedValue.toFixed(3)}, encodedVal=${encodedVal}, tex=(${texX.toFixed(1)}, ${texY.toFixed(1)})`);
-            logCount++;
-        }
-        */
-        // ------------------
+        if (typeof rawValue === 'number' && !isNaN(rawValue) && rawValue >= 0) { 
+           processedValue = Math.pow(rawValue * brightness_premult, powValue) * multValue; 
+        } 
+        let brightnessForShader = p.constrain(processedValue / 255.0, 0.0, 1.0); // Normalize to 0-1 for float texture
+        // ------------------------------
 
-        // Draw a point (or tiny rect) - use Red for value, Alpha as seed marker
-        // Ensure background clear includes alpha (above)
-        initialDistFieldTex.fill(encodedVal, 0, 0, 255); // Store value in Red, set Alpha=1 ONLY here
-        initialDistFieldTex.rect(texX, texY, 1, 1); // Draw 1x1 pixel
+        // --- Store Data in Float Array --- 
+        let arrayIndex = tileCount * 4;
+        tileDataFloatArray[arrayIndex + 0] = normX; // R = normX
+        tileDataFloatArray[arrayIndex + 1] = normY; // G = normY
+        tileDataFloatArray[arrayIndex + 2] = brightnessForShader; // B = brightness (0-1)
+        tileDataFloatArray[arrayIndex + 3] = 1.0; // A = Active flag (optional, but good practice)
+        
+        if (tileCount < 5) { // Log first 5 tiles
+            console.log(`Storing Tile ${tileCount}: normX=${normX.toFixed(3)}, normY=${normY.toFixed(3)}, brightness=${brightnessForShader.toFixed(3)}`);
+        }
+        // -----------------------------
+
+        tileCount++; // Increment actual tile count
       }
-      initialDistFieldTex.pop();
+      
+      // --- Upload Data to GPU Texture ---
+      gl.bindTexture(gl.TEXTURE_2D, tileDataTextureObject);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, // level
+                       0, 0, // xoffset, yoffset
+                       tileDataTexSize, tileDataTexSize, // width, height
+                       gl.RGBA, gl.FLOAT, 
+                       tileDataFloatArray); // Upload the data
+      gl.bindTexture(gl.TEXTURE_2D, null); // Unbind
+      // ----------------------------------
+
+      parent.tileCountForShader = tileCount; // Store count for p.draw
       needsDataTextureUpdate = false; // Reset flag
-      console.log("Initial Data Texture Updated for Max Propagation.");
+      console.log(`Tile Data Float Texture Updated. Stored ${tileCount} tiles.`);
     }
 
     // Helper function to bind source texture for shader pass
@@ -126,9 +124,9 @@ function sketch(parent) { // we pass the sketch data from the parent
     }
 
     p.preload = function() {
-      passThroughShader = p.loadShader('passThrough.vert', 'passThrough.vert'); // Use same vert for all
-      blurShader = p.loadShader('passThrough.vert', 'blur.frag');
-      finalRenderShader = p.loadShader('passThrough.vert', 'finalRender.frag');
+      // passThroughShader = p.loadShader('passThrough.vert', 'passThrough.vert'); // REMOVED - Incorrect load and unused
+      // blurShader = p.loadShader('passThrough.vert', 'shaders/blur.frag'); // REMOVED - File not found and unused
+      finalRenderShader = p.loadShader('passThrough.vert', 'shaders/finalRender.frag'); // Corrected path
     }
 
     p.setup = function() {
@@ -145,88 +143,132 @@ function sketch(parent) { // we pass the sketch data from the parent
       
       gl = p.drawingContext; 
 
-      // Create graphics objects
-      let texWidth = p.width;
-      let texHeight = p.height;
-      initialDistFieldTex = p.createGraphics(texWidth, texHeight); 
-      // pingPongTexA = p.createGraphics(texWidth, texHeight, p.WEBGL); // REMOVED
-      // pingPongTexB = p.createGraphics(texWidth, texHeight, p.WEBGL); // REMOVED
-      tempBufferA = p.createGraphics(texWidth, texHeight);
-      tempBufferB = p.createGraphics(texWidth, texHeight);
-      // Explicitly enable alpha for WebGL buffers (REMOVED)
-      // pingPongTexA.setAttributes({ alpha: true });
-      // pingPongTexB.setAttributes({ alpha: true });
-      // pingPongTexA.noSmooth(); 
-      // pingPongTexB.noSmooth();
-      // Ensure temp buffers don't affect main canvas stroke/fill
-      tempBufferA.noStroke();
-      tempBufferB.noStroke();
+      // --- Create Raw Float Texture for Tile Data ---
+      tileDataTextureObject = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tileDataTextureObject);
+      
+      // Allocate storage for 32x32 float texture (RGBA)
+      const level = 0;
+      const internalFormat = gl.RGBA32F; // Use 32-bit float format
+      const border = 0;
+      const srcFormat = gl.RGBA;
+      const srcType = gl.FLOAT;
+      const data = null; // Allocate storage, but don't upload data yet
+      gl.texImage2D(gl.TEXTURE_2D, level, internalFormat, 
+                    tileDataTexSize, tileDataTexSize, border, 
+                    srcFormat, srcType, data);
+
+      // Set NEAREST filtering and CLAMP_TO_EDGE wrapping
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      
+      gl.bindTexture(gl.TEXTURE_2D, null); // Unbind
+      console.log("Created and configured float tileDataTextureObject");
+      // -------------------------------------------
 
       prepareInitialDataTexture(parent.data); 
+      // setTextureParameters(tileDataTex); // REMOVED
     };
 
     p.draw = function() {
       if (needsDataTextureUpdate) {
           prepareInitialDataTexture(parent.data);
+          // setTextureParameters(tileDataTex); // REMOVED
       }
       
-      if (!initialDistFieldTex || !tempBufferA || !tempBufferB) return; 
+      if (!tileDataTextureObject) return; 
 
-      // --- Perform Blur using Main Canvas & Temp 2D Buffers ---
-      const texelSize = [1.0 / p.width, 1.0 / p.height]; // Use main canvas size
-      const inputTextureUnit = 0; // Texture unit (might be ignored)
-      
-      let currentSource = initialDistFieldTex; // Start with the raw data (2D Graphics)
-
-      p.push(); // Save main canvas state if needed
-      p.noStroke(); // Ensure no stroke for rects
-
-      // --- Restore Full Blur Loop --- 
-      for (let i = 0; i < blurPasses; i++) { // <-- Restore loop
-          // --- Horizontal Pass --- (Draw to main canvas p)
-          // Direction doesn't strictly matter for this max shader, but keep structure
-          p.shader(blurShader); // Max propagation shader
-          bindSourceTexture(currentSource, blurShader, inputTextureUnit); // Source is initial or tempBufferB
-          blurShader.setUniform('u_texelSize', texelSize);
-          blurShader.setUniform('u_blurDirection', [1.0, 0.0]); 
-          p.rect(-p.width / 2, -p.height / 2, p.width, p.height); // Draw on main canvas
-          p.resetShader(); // Reset shader on main canvas
-          
-          // Copy result from main canvas to temp buffer A
-          tempBufferA.clear(); // Clear target buffer before copy
-          tempBufferA.image(p, 0, 0, tempBufferA.width, tempBufferA.height); 
-          currentSource = tempBufferA; // Result of H pass is now the source for V pass
-
-          // --- Vertical Pass --- (Draw to main canvas p)
-          p.shader(blurShader);
-          bindSourceTexture(currentSource, blurShader, inputTextureUnit); // Source is tempBufferA
-          blurShader.setUniform('u_texelSize', texelSize);
-          blurShader.setUniform('u_blurDirection', [0.0, 1.0]); 
-          p.rect(-p.width / 2, -p.height / 2, p.width, p.height); // Draw on main canvas
-          p.resetShader(); // Reset shader on main canvas
-          
-          // Copy result from main canvas to temp buffer B
-          tempBufferB.clear(); // Clear target buffer before copy
-          tempBufferB.image(p, 0, 0, tempBufferB.width, tempBufferB.height);
-          currentSource = tempBufferB; // Result of V pass is now the source for next H pass
+      // --- Set texture parameters for tileDataTex (once) ---
+      /* // REMOVED - Using helper function now
+      if (!tileDataTexParamsSet && tileDataTex._glTexture) {
+          try {
+              gl.bindTexture(gl.TEXTURE_2D, tileDataTex._glTexture);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+              gl.bindTexture(gl.TEXTURE_2D, null); // Unbind
+              tileDataTexParamsSet = true;
+              console.log("Set NEAREST filtering and CLAMP_TO_EDGE wrap on tileDataTex in p.draw");
+          } catch (e) {
+              console.error("Error setting texture parameters in p.draw:", e);
+              tileDataTexParamsSet = true; // Prevent repeated attempts if error occurs
+          }
+      } else if (!tileDataTexParamsSet && !tileDataTex._glTexture) {
+          // Optional: Log if the texture is still not ready on the first few frames
+          // console.log("tileDataTex._glTexture not ready yet in p.draw");
       }
-      p.pop(); // Restore main canvas state
+      */
+      // ----------------------------------------------------
 
-      // After the loop, currentSource holds the final blurred result (last V pass -> tempBufferB)
+      // --- RBF Interpolation Approach ---
+      const texelSize = [1.0 / p.width, 1.0 / p.height]; // Keep for final shader if needed
+      const inputTextureUnit = 0; // Keep if needed
+      
+      let currentSource = tileDataTextureObject; // Still needed?
+
+      // Skip blur loop
+      /*
+      p.push(); 
+      p.noStroke(); 
+      for (let i = 0; i < blurPasses; i++) {
+          // ... loop ...
+      }
+      p.pop(); 
       let finalBlurredTex = currentSource; 
-      // ------------------------
-
-      // --- Final Render Shader Block --- (Draw to main canvas p)
+      */
+      
+      // --- Prepare Data for RBF Shader --- 
+      let tileCount = tileDataTexSize * tileDataTexSize; // Max tiles based on texture size
+      // Pad array if needed (REMOVED)
+      /*
+      let paddedTileData = [...tileData];
+      while (paddedTileData.length < MAX_TILES * 3) {
+          paddedTileData.push(0.0, 0.0, 0.0); // Pad with dummy vec3
+      }
+      */
+      // Check tile count (still relevant)
+      if (tileCount > tileDataTexSize * tileDataTexSize) {
+          console.warn(`Tile count (${tileCount}) exceeds MAX_TILES (${tileDataTexSize * tileDataTexSize}). Clamping.`);
+          tileCount = tileDataTexSize * tileDataTexSize;
+      }
+      // console.log(`tileCount for shader: ${tileCount}`); // Removed log
+      let rbfFalloff = 50.0; // Reverted falloff to default
+      // -----------------------------------
+      
+      // --- Final Render Shader Block (RBF Interpolation) ---
       p.background(0); // Clear main canvas before final render 
-      p.shader(finalRenderShader); // Use standard final render shader
-      bindSourceTexture(finalBlurredTex, finalRenderShader, inputTextureUnit); // Use result from loop
-      finalRenderShader.setUniform('u_smoothedTex', finalBlurredTex); // Use result from loop
-      finalRenderShader.setUniform('u_maxDistValue', maxObservedDist); // Pass max observed distance
-      finalRenderShader.setUniform('u_resolution', [p.width, p.height]);
-      finalRenderShader.setUniform('u_texelSize', texelSize); // Pass texel size
-      p.rect(-p.width / 2, -p.height / 2, p.width, p.height); // Draw on main canvas
+      
+      // --- Activate texture unit and bind data texture ---
+      const dataTextureUnit = 1; // Use texture unit 1 (0 is often default)
+      gl.activeTexture(gl.TEXTURE0 + dataTextureUnit);
+      gl.bindTexture(gl.TEXTURE_2D, tileDataTextureObject);
+      // --------------------------------------------------
+      
+      p.shader(finalRenderShader); 
+      // Pass tile data and control uniforms
+      finalRenderShader.setUniform('u_tileDataTexture', dataTextureUnit); // Pass TEXTURE UNIT INDEX
+      finalRenderShader.setUniform('u_tileDataTextureSize', [tileDataTexSize, tileDataTexSize]); // Pass texture dimensions
+      finalRenderShader.setUniform('u_tileCount', tileCount);
+      finalRenderShader.setUniform('u_falloffFactor', rbfFalloff);
+      finalRenderShader.setUniform('u_resolution', [p.width, p.height]); // For coordinate conversion
+      // We don't need u_smoothedTex or u_texelSize if calculation is done purely from u_tileData
+      // finalRenderShader.setUniform('u_maxDistValue', maxObservedDist); 
+
+      p.ortho(); // Set orthographic projection before drawing rect
+      p.rect(-p.width / 2, -p.height / 2, p.width, p.height); // Draw fullscreen quad
       p.resetShader();
+      
+      // --- Unbind texture from unit ---
+      gl.activeTexture(gl.TEXTURE0 + dataTextureUnit);
+      gl.bindTexture(gl.TEXTURE_2D, null);
       // -----------------------------
+      
+      // --- TEST: Draw solid color without shader ---
+      // p.background(255, 0, 0); // Set background to red
+      // ---------------------------------------------
     };
     
     p.dataChanged = function(data, oldData) {
@@ -239,11 +281,20 @@ function sketch(parent) { // we pass the sketch data from the parent
       if ((data.display == 'none' || newWidth !== p.width || newHeight !== p.height) && newWidth > 0 && newHeight > 0) {
          p.resizeCanvas(newWidth, newHeight);
          // Also resize graphics buffers!
-         initialDistFieldTex.resizeCanvas(newWidth, newHeight);
-         // pingPongTexA.resizeCanvas(newWidth, newHeight); // REMOVED
-         // pingPongTexB.resizeCanvas(newWidth, newHeight); // REMOVED
-         tempBufferA.resizeCanvas(newWidth, newHeight);
-         tempBufferB.resizeCanvas(newWidth, newHeight);
+         // initialDistFieldTex.resizeCanvas(newWidth, newHeight); // REMOVED
+         // tileDataTex.resizeCanvas(newWidth, newHeight); // REMOVED
+         
+         // --- Recreate float texture on resize? ---
+         // For now, just delete. prepareInitialDataTexture will recreate/repopulate if needed.
+         if (tileDataTextureObject) {
+             gl.deleteTexture(tileDataTextureObject);
+             tileDataTextureObject = null; // Ensure it gets recreated
+             console.log("Deleted tileDataTextureObject on resize");
+         }
+         // TODO: Could potentially recreate texture here with same size?
+         // -----------------------------------------
+         
+         // setTextureParameters(tileDataTex); // REMOVED
          parent.$emit('update:resize-completed'); 
          parent.$emit('update:width', newWidth); 
          parent.$emit('update:height', newHeight); 
@@ -262,6 +313,8 @@ function sketch(parent) { // we pass the sketch data from the parent
           data.dot_pow !== oldData.dot_pow     // Add slider value
          /* Add other params affecting position/minDist */) { 
           needsDataTextureUpdate = true;
+          // Ensure tile count is reset if data updates
+          tileCount = 0;
           // console.log("dataChanged triggered texture update due to slider change or other."); // REMOVE DEBUG
       }
        
