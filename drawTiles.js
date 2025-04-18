@@ -334,7 +334,7 @@ function sketch(parent) { // we pass the sketch data from the parent
         }
 
         instance.fill(`rgba(0, 0, 0, 1)`);
-        instance.ellipse(tile.mean.x * preFactor, tile.mean.y * preFactor, Math.pow(tile.minDistance * preFactor, 1.5) * 1);
+        instance.ellipse(tile.mean.x * preFactor, tile.mean.y * preFactor, Math.pow(tile.minDistance * preFactor, data.dotSizePow) * data.dotSizeMult);
 
         /*
         instance.beginShape();

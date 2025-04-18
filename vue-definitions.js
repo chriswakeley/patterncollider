@@ -620,13 +620,13 @@ var app = new Vue({
 
   data: {
     dataBackup: {},
-    urlParameters: ['symmetry', 'pattern', 'pan', 'disorder', 'randomSeed', 'radius', 'zoom', 'rotate', 'colorTiles', 'showIntersections', 'stroke', 'showStroke', 'hue', 'hueRange', 'contrast', 'sat', 'reverseColors', 'orientationColoring'],
+    urlParameters: ['symmetry', 'pattern', 'pan', 'disorder', 'randomSeed', 'radius', 'zoom', 'rotate', 'colorTiles', 'showIntersections', 'stroke', 'showStroke', 'hue', 'hueRange', 'contrast', 'sat', 'reverseColors', 'orientationColoring', 'dotSizeMult', 'dotSizePow'],
     symmetry: 5,
     radius: 75,
     pattern: 0.2,
     pan: 0,
     disorder: 0,
-    randomSeed: 0.00,
+    randomSeed: 0,
     zoom: 1,
     showIntersections: true,
     colorTiles: true,
@@ -653,7 +653,17 @@ var app = new Vue({
     tilingDownloadCount: 0,
     mode: 'shape',
     fullscreen: false,
-    fullscreenPossible: document.fullscreenEnabled || document.webkitFullscreenEnabled
+    fullscreenPossible: document.fullscreenEnabled || document.webkitFullscreenEnabled,
+    dotSizeMult: 1,
+    dotSizePow: 1,
+    saveKeys: [
+      'symmetry', 'steps', 'pattern', 'disorder', 'radius', 'zoom', 
+      'colorTiles', 'showIntersections', 'showStroke', 'stroke', 'hue', 'sat', 
+      'contrast', 'hueRange', 'reverseColors', 'rotate', 'orientationColoring',
+      'randomSeed', 'pan', 
+      'dotSizeMult', 'dotSizePow'
+    ],
+    appDescription: 'Pattern Collider Vue App',
   }
 
 });
