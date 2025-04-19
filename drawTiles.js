@@ -22,8 +22,8 @@ function sketch(parent) { // we pass the sketch data from the parent
     let tilePosTexture = null;
     let tileDataTexture = null;
     let tileCount = 0;
-    const MAX_TILES = 4096; // Max tiles supported by texture size (e.g., 32x32 = 1024)
-    const TEXTURE_SIZE = 64; // Texture dimensions (TEXTURE_SIZE x TEXTURE_SIZE)
+    const MAX_TILES = 16384; // Max tiles supported by texture size (e.g., 32x32 = 1024)
+    const TEXTURE_SIZE = 128; // Texture dimensions (TEXTURE_SIZE x TEXTURE_SIZE)
     let tilePositions = new Float32Array(MAX_TILES * 2); // Store XY
     let tileDistances = new Float32Array(MAX_TILES * 1); // Store minDistance
 
@@ -272,6 +272,8 @@ function sketch(parent) { // we pass the sketch data from the parent
       setupAttributes(); // Setup quad attributes
       
       prepareData(parent.data); // Prepare initial data and textures
+      
+      p.frameRate(30); // Set target frame rate for continuous draw
     };
 
     p.draw = function() {

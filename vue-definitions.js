@@ -204,6 +204,93 @@ var app = new Vue({
 
     },
 
+    // --- Animation Methods ---
+    togglePatternAnimation() {
+        this.isAnimatingPattern = !this.isAnimatingPattern;
+        if (this.isAnimatingPattern) {
+            console.log("Starting Pattern animation...");
+            this.animationPatternCenter = this.pattern; // Use current pattern as center
+        } else {
+            console.log("Stopping Pattern animation...");
+            // Optional: Reset pattern to the center value when stopping?
+            // this.pattern = this.animationPatternCenter; 
+        }
+        this.startOrStopMainAnimationLoop();
+    },
+    
+    toggleDisorderAnimation() {
+        this.isAnimatingDisorder = !this.isAnimatingDisorder;
+        if (this.isAnimatingDisorder) {
+            console.log("Starting Disorder animation...");
+            this.animationDisorderCenter = this.disorder; // Use current disorder as center
+        } else {
+            console.log("Stopping Disorder animation...");
+            // Optional: Reset disorder to the center value when stopping?
+            // this.disorder = this.animationDisorderCenter;
+        }
+        this.startOrStopMainAnimationLoop();
+    },
+    
+    startOrStopMainAnimationLoop() {
+        const shouldBeAnimating = this.isAnimatingPattern || this.isAnimatingDisorder;
+        
+        if (shouldBeAnimating && this.mainAnimationId === null) {
+            // Start the loop
+            console.log("Starting main animation loop...");
+            this.mainAnimationStartTime = Date.now(); // Reset start time when loop begins
+            this.mainAnimateLoop(); 
+        } else if (!shouldBeAnimating && this.mainAnimationId !== null) {
+            // Stop the loop
+            console.log("Stopping main animation loop...");
+            cancelAnimationFrame(this.mainAnimationId);
+            this.mainAnimationId = null;
+        }
+    },
+
+    mainAnimateLoop() {
+        // Calculate elapsed time relative to the main loop start
+        const elapsedMilliseconds = Date.now() - this.mainAnimationStartTime;
+        const elapsedSeconds = elapsedMilliseconds / 1000.0;
+
+        // --- Animation Parameters (can be moved to data later) ---
+        const patternAmplitude = 1.9; 
+        const patternSpeed = 0.005; // Oscillations per second
+        const disorderAmplitude = 0.9;
+        const disorderSpeed = 0.003; // Oscillations per second (different speed)
+        // ---------------------------------------------------------
+
+        let needsUpdate = false;
+        
+        // Animate Pattern if active
+        if (this.isAnimatingPattern) {
+            const newPattern = this.animationPatternCenter + patternAmplitude * Math.sin(patternSpeed * 2 * Math.PI * elapsedSeconds);
+            // Check if value actually changed to avoid unnecessary updates if amplitude is 0
+            if (this.pattern !== newPattern) {
+                 this.pattern = newPattern;
+                 needsUpdate = true;
+            }
+        }
+
+        // Animate Disorder if active
+        if (this.isAnimatingDisorder) {
+            let newDisorder = this.animationDisorderCenter + disorderAmplitude * Math.sin(disorderSpeed * 2 * Math.PI * elapsedSeconds);
+            // Clamp disorder between 0 and 1 (or other valid range)
+            newDisorder = Math.max(0, Math.min(1, newDisorder)); 
+            if (this.disorder !== newDisorder) {
+                 this.disorder = newDisorder;
+                 needsUpdate = true;
+            }
+        }
+
+        // Schedule the next frame *only* if any animation is still active
+        if (this.isAnimatingPattern || this.isAnimatingDisorder) {
+            this.mainAnimationId = requestAnimationFrame(this.mainAnimateLoop);
+        } else {
+             this.mainAnimationId = null; // Ensure ID is cleared if both stopped between frames
+        }
+    },
+    // ------------------------
+
   },
 
   computed: {
@@ -653,6 +740,12 @@ var app = new Vue({
       'dotSizeMult', 'dotSizePow'
     ],
     appDescription: 'Pattern Collider Vue App',
+    isAnimatingPattern: false,
+    animationPatternCenter: null,
+    mainAnimationId: null,
+    mainAnimationStartTime: null,
+    isAnimatingDisorder: false,
+    animationDisorderCenter: null,
   }
 
 });
