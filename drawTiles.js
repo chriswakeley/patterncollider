@@ -174,6 +174,7 @@ function sketch(parent) { // we pass the sketch data from the parent
               
               // Calculate minDistance (raw value, shader will handle interpolation)
               let neighbors = Object.values(tile.neighbors);
+              
               let minDistance = Infinity;
               if (neighbors.length >= 2 && neighbors[0].length >=1 && neighbors[1].length >=1) { // Basic check
                    // This calculation seems complex and potentially error-prone
@@ -197,7 +198,17 @@ function sketch(parent) { // we pass the sketch data from the parent
                    minDistance = 0; // Default if neighbors aren't as expected
                    console.log("No neighbors found for tile:", tile);
               }
-              
+                   
+                  /*
+              let minDistance = Math.min(
+                Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][0].y, 2)),
+                Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][1].y, 2)),
+                Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][0].y, 2)),
+                Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][1].y, 2))
+              );
+              //console.log("minDistance:", minDistance);
+              minDistance = Math.pow((minDistance) * preFactor, data.dotSizePow) * data.dotSizeMult;
+              */
               // TODO: Need to normalize or scale this minDistance appropriately 
               //       before passing to shader, or handle normalization in shader.
               //       For now, pass the scaled value. Consider its range.
@@ -278,7 +289,7 @@ function sketch(parent) { // we pass the sketch data from the parent
       }
       if (uInterpolationPowerLoc) {
            // Make this controllable via parent.data later? 
-           gl.uniform1f(uInterpolationPowerLoc, 0.8); // Default power of 2
+           gl.uniform1f(uInterpolationPowerLoc, 2); // Default power of 2
       }
       
       // Bind textures

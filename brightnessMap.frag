@@ -63,9 +63,10 @@ void main() {
       // Inverse distance weighting
       // Clamp distance to avoid extremely large weights near centers
       //float weight = 1.0 / pow(max(dist, 1.0), uInterpolationPower);
-      float weight = 1.0 / pow(dist, uInterpolationPower);
+      float weight = 1.0 /(pow(dist + 1.0, uInterpolationPower) * pow(tileBrightness, -2.0));
       
       totalBrightness += weight * tileBrightness;
+      //totalBrightness += tileBrightness * 0.001;
       totalWeight += weight;
   }
 
@@ -79,7 +80,7 @@ void main() {
   
   // Option 2: Normalize based on some factor (e.g., related to canvas size or zoom) 
   // This needs adjustment based on visual results. Let's try a simple division.
-  finalBrightness = clamp(finalBrightness / 100.0, 0.0, 1.0); // Arbitrary scaling factor
+  finalBrightness = 1.0 - clamp(finalBrightness / 100.0, 0.0, 1.0); // Arbitrary scaling factor
 
   // Output final grayscale color
   gl_FragColor = vec4(vec3(finalBrightness), 1.0);
