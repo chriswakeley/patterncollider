@@ -151,6 +151,8 @@ function sketch(parent) { // we pass the sketch data from the parent
           let tiles = Object.values(data.tiles);
           let preFactor = data.zoom * Math.min(p.width, p.height) / data.steps;
           let panOffset = p.createVector(data.pan * data.steps * preFactor, 0);
+          console.log("Pan Offset:", panOffset);
+          console.log("Pre Factor:", preFactor);
           let rotateRad = p.radians(data.rotate);
           panOffset.rotate(rotateRad);
           //let effectiveZoom = Math.max(0.01, data.zoom); // Not directly needed here?
@@ -162,9 +164,11 @@ function sketch(parent) { // we pass the sketch data from the parent
               // Calculate screen position (center of canvas is 0,0 for shader)
               let worldX = tile.mean.x * preFactor;
               let worldY = tile.mean.y * preFactor;
-              let rotatedX = worldX * Math.cos(rotateRad) - worldY * Math.sin(rotateRad) + panOffset.x;
+              let rotatedX = worldX * Math.cos(rotateRad) - worldY * Math.sin(rotateRad) + panOffset.x * -2.5;
               let rotatedY = worldX * Math.sin(rotateRad) + worldY * Math.cos(rotateRad) + panOffset.y;
-              
+              //let rotatedX = worldX * Math.cos(rotateRad) - worldY * Math.sin(rotateRad);
+              //let rotatedY = worldX * Math.sin(rotateRad) + worldY * Math.cos(rotateRad);
+
               // Convert to pixel coordinates (origin top-left for frag shader gl_FragCoord)
               let screenX = rotatedX + p.width / 2;
               let screenY = rotatedY + p.height / 2; 
@@ -189,7 +193,7 @@ function sketch(parent) { // we pass the sketch data from the parent
                         );
                         // Scale minDistance by preFactor like the original radius calculation did?
                         // Let's scale it here to potentially keep values in a more manageable range
-                        minDistance = Math.pow((minDistance) * preFactor, data.dotSizePow) * data.dotSizeMult; 
+                        minDistance = Math.pow((minDistance * (0.01 * data.radius)) * preFactor / data.zoom, data.dotSizePow) * data.dotSizeMult
                    } catch(e) {
                         console.error("Error calculating minDistance for tile:", tile, e);
                         minDistance = 0; // Default on error
