@@ -10,6 +10,8 @@ varying vec2 vScreenCoord; // Screen coordinates (0.0 to 1.0)
 // Uniforms
 uniform sampler2D uTilePositions; // Texture with tile XY pixel coords (packed in RGBA)
 uniform sampler2D uTileData;      // Texture with tile minDistance (packed in RGBA, use R)
+uniform sampler2D uTileDirections1; // Texture with first line direction vectors (packed in RGBA, use RG)
+uniform sampler2D uTileDirections2; // Texture with second line direction vectors (packed in RGBA, use RG)
 uniform int uTileCount;           // Number of active tiles
 uniform vec2 uScreenSize;         // Canvas dimensions in pixels
 uniform float uInterpolationPower;  // Power for inverse distance weighting (e.g., 2.0)
@@ -51,6 +53,13 @@ void main() {
       vec4 data = texture2D(uTileData, texCoord);
       float tileBrightness = data.r; // minDistance stored in R
       
+      // Sample direction data
+      vec4 dir1Data = texture2D(uTileDirections1, texCoord);
+      vec2 direction1 = dir1Data.xy; // First line direction stored in R, G
+      
+      vec4 dir2Data = texture2D(uTileDirections2, texCoord);
+      vec2 direction2 = dir2Data.xy; // Second line direction stored in R, G
+      
       // --- Interpolation --- 
       float dist = distance(fragCoordPixels, tilePosPixels);
 
@@ -60,13 +69,26 @@ void main() {
           break; // We are exactly at a tile center
       }
       
-      // Inverse distance weighting
-      // Clamp distance to avoid extremely large weights near centers
-      //float weight = 1.0 / pow(max(dist, 1.0), uInterpolationPower);
-      float weight = tileBrightness * tileBrightness / (dist * dist + 2.0 * dist + 1.0);
+      // --- Example: Use direction vectors for anisotropic effects ---
+      // Calculate vector from fragment to tile center
+      vec2 fragToTile = normalize(tilePosPixels - fragCoordPixels);
+      
+      // Calculate alignment with line directions (0 = perpendicular, 1 = parallel)
+      float alignment1 = abs(dot(fragToTile, direction1));
+      float alignment2 = abs(dot(fragToTile, direction2));
+      
+      // Use maximum alignment to create directional emphasis
+      float directionalWeight = max(alignment1, alignment2);
+      
+      // You could also calculate the angle between the two lines:
+      // float lineAngle = acos(clamp(dot(direction1, direction2), -1.0, 1.0));
+      
+      // Inverse distance weighting with optional directional modulation
+      float weight = tileBrightness * tileBrightness / (1.0 + directionalWeight * 30.0) / (dist * dist + 2.0 * dist + 1.0);
+      // Optionally modulate by directional alignment:
+      //weight *= (1.0 + directionalWeight * 30.0); // Enhance weight along line directions
       
       totalBrightness += weight * tileBrightness;
-      //totalBrightness += tileBrightness * 0.001;
       totalWeight += weight;
   }
 

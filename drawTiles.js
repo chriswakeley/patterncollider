@@ -21,16 +21,22 @@ function sketch(parent) { // we pass the sketch data from the parent
     // Data Textures
     let tilePosTexture = null;
     let tileDataTexture = null;
+    let tileDirections1Texture = null;
+    let tileDirections2Texture = null;
     let tileCount = 0;
     const MAX_TILES = 16384; // Max tiles supported by texture size (e.g., 32x32 = 1024)
     const TEXTURE_SIZE = 128; // Texture dimensions (TEXTURE_SIZE x TEXTURE_SIZE)
     let tilePositions = new Float32Array(MAX_TILES * 2); // Store XY
     let tileDistances = new Float32Array(MAX_TILES * 1); // Store minDistance
+    let tileDirections1 = new Float32Array(MAX_TILES * 2); // Store first line direction XY
+    let tileDirections2 = new Float32Array(MAX_TILES * 2); // Store second line direction XY
 
     // Uniform locations
     let uScreenSizeLoc;
     let uTilePositionsLoc;
     let uTileDataLoc;
+    let uTileDirections1Loc;
+    let uTileDirections2Loc;
     let uTileCountLoc;
     let uInterpolationPowerLoc;
 
@@ -118,10 +124,12 @@ function sketch(parent) { // we pass the sketch data from the parent
         uScreenSizeLoc = gl.getUniformLocation(program, "uScreenSize");
         uTilePositionsLoc = gl.getUniformLocation(program, "uTilePositions");
         uTileDataLoc = gl.getUniformLocation(program, "uTileData");
+        uTileDirections1Loc = gl.getUniformLocation(program, "uTileDirections1");
+        uTileDirections2Loc = gl.getUniformLocation(program, "uTileDirections2");
         uTileCountLoc = gl.getUniformLocation(program, "uTileCount");
         uInterpolationPowerLoc = gl.getUniformLocation(program, "uInterpolationPower");
 
-        if (!uScreenSizeLoc || !uTilePositionsLoc || !uTileDataLoc || !uTileCountLoc || !uInterpolationPowerLoc) {
+        if (!uScreenSizeLoc || !uTilePositionsLoc || !uTileDataLoc || !uTileDirections1Loc || !uTileDirections2Loc || !uTileCountLoc || !uInterpolationPowerLoc) {
              console.warn("Could not find one or more uniform locations. Check shader names.");
         }
     }
@@ -155,6 +163,8 @@ function sketch(parent) { // we pass the sketch data from the parent
         // Use typed array fill for better performance
         tilePositions.fill(0);
         tileDistances.fill(0);
+        tileDirections1.fill(0);
+        tileDirections2.fill(0);
       } else {
           // Pre-calculate all constants outside the loop
           const tiles = Object.values(data.tiles);
@@ -171,12 +181,14 @@ function sketch(parent) { // we pass the sketch data from the parent
           // Create typed array views for better cache locality
           const posView = new Float32Array(tilePositions.buffer, 0, MAX_TILES * 2);
           const distView = new Float32Array(tileDistances.buffer, 0, MAX_TILES);
+          const dir1View = new Float32Array(tileDirections1.buffer, 0, MAX_TILES * 2);
+          const dir2View = new Float32Array(tileDirections2.buffer, 0, MAX_TILES * 2);
           
           const maxTiles = Math.min(tiles.length, MAX_TILES);
           
           for (let i = 0; i < maxTiles; i++) {
               const tile = tiles[i];
-              if (!tile.mean || !tile.neighbors) continue;
+              if (!tile.mean || !tile.neighbors || !tile.lines) continue;
               
               // Pre-calculate world position
               const worldX = tile.mean.x * preFactor;
@@ -224,6 +236,27 @@ function sketch(parent) { // we pass the sketch data from the parent
               }
               
               distView[tileCount] = minDistance;
+              
+              // Use pre-calculated directions from Vue
+              let dir1X = 0, dir1Y = 0, dir2X = 0, dir2Y = 0;
+              if (tile.directions && tile.directions.length >= 2) {
+                dir1X = tile.directions[0].x;
+                dir1Y = tile.directions[0].y;
+                dir2X = tile.directions[1].x;
+                dir2Y = tile.directions[1].y;
+                // Debug: log first few tiles to verify directions are working
+                if (tileCount < 3) {
+                  console.log(`Tile ${tileCount}: directions = [${dir1X.toFixed(3)}, ${dir1Y.toFixed(3)}], [${dir2X.toFixed(3)}, ${dir2Y.toFixed(3)}]`);
+                }
+              }
+              
+              // Store direction vectors
+              const dirIndex = tileCount << 1; // tileCount * 2
+              dir1View[dirIndex] = dir1X;
+              dir1View[dirIndex + 1] = dir1Y;
+              dir2View[dirIndex] = dir2X;
+              dir2View[dirIndex + 1] = dir2Y;
+              
               tileCount++;
           }
           
@@ -231,6 +264,8 @@ function sketch(parent) { // we pass the sketch data from the parent
           if (tileCount < MAX_TILES) {
             posView.fill(0, tileCount * 2);
             distView.fill(0, tileCount);
+            dir1View.fill(0, tileCount * 2);
+            dir2View.fill(0, tileCount * 2);
           }
       }
 
@@ -269,7 +304,9 @@ function sketch(parent) { // we pass the sketch data from the parent
       // Create float textures
       tilePosTexture = createFloatTexture(TEXTURE_SIZE, TEXTURE_SIZE);
       tileDataTexture = createFloatTexture(TEXTURE_SIZE, TEXTURE_SIZE);
-      if (!tilePosTexture || !tileDataTexture) {
+      tileDirections1Texture = createFloatTexture(TEXTURE_SIZE, TEXTURE_SIZE);
+      tileDirections2Texture = createFloatTexture(TEXTURE_SIZE, TEXTURE_SIZE);
+      if (!tilePosTexture || !tileDataTexture || !tileDirections1Texture || !tileDirections2Texture) {
            console.error("Failed to create float textures. Aborting setup.");
            return; // Stop if textures couldn't be created
       } 
@@ -316,9 +353,11 @@ function sketch(parent) { // we pass the sketch data from the parent
       }
       
       // Only update textures when data changed
-      if (texturesDirty && gl && tilePosTexture && tileDataTexture && tileCount > 0) {
+      if (texturesDirty && gl && tilePosTexture && tileDataTexture && tileDirections1Texture && tileDirections2Texture && tileCount > 0) {
         updateFloatTexture(tilePosTexture, TEXTURE_SIZE, TEXTURE_SIZE, tilePositions);
         updateFloatTexture(tileDataTexture, TEXTURE_SIZE, TEXTURE_SIZE, tileDistances);
+        updateFloatTexture(tileDirections1Texture, TEXTURE_SIZE, TEXTURE_SIZE, tileDirections1);
+        updateFloatTexture(tileDirections2Texture, TEXTURE_SIZE, TEXTURE_SIZE, tileDirections2);
         texturesDirty = false;
       }
       
@@ -332,6 +371,16 @@ function sketch(parent) { // we pass the sketch data from the parent
           gl.activeTexture(gl.TEXTURE1); // Activate texture unit 1
           gl.bindTexture(gl.TEXTURE_2D, tileDataTexture);
           gl.uniform1i(uTileDataLoc, 1); // Tell shader sampler to use texture unit 1
+      }
+      if (uTileDirections1Loc && tileDirections1Texture) {
+          gl.activeTexture(gl.TEXTURE2); // Activate texture unit 2
+          gl.bindTexture(gl.TEXTURE_2D, tileDirections1Texture);
+          gl.uniform1i(uTileDirections1Loc, 2); // Tell shader sampler to use texture unit 2
+      }
+      if (uTileDirections2Loc && tileDirections2Texture) {
+          gl.activeTexture(gl.TEXTURE3); // Activate texture unit 3
+          gl.bindTexture(gl.TEXTURE_2D, tileDirections2Texture);
+          gl.uniform1i(uTileDirections2Loc, 3); // Tell shader sampler to use texture unit 3
       }
 
       // --- Bind Attributes ---
@@ -354,6 +403,10 @@ function sketch(parent) { // we pass the sketch data from the parent
       gl.activeTexture(gl.TEXTURE0); // Unbind textures (optional but good practice)
       gl.bindTexture(gl.TEXTURE_2D, null);
       gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE3);
       gl.bindTexture(gl.TEXTURE_2D, null);
       
       needsRedraw = false;

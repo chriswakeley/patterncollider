@@ -517,11 +517,37 @@ var app = new Vue({
           pt.angles = JSON.stringify(angles);
           pt.mean = mean;
 
+          // Calculate direction vectors for the first two intersecting lines
+          let directions = [];
+          if (pt.lines.length >= 2) {
+            // Get direction vectors for the first two lines
+            for (let i = 0; i < Math.min(2, pt.lines.length); i++) {
+              const line = pt.lines[i];
+              const sc = this.sinCosTable[line.angle];
+              // Apply rotation to the direction vector
+              const dirX = sc.cos * this.sinCosRotate.cos - sc.sin * this.sinCosRotate.sin;
+              const dirY = sc.cos * this.sinCosRotate.sin + sc.sin * this.sinCosRotate.cos;
+              directions.push({x: dirX, y: dirY});
+            }
+          }
+          
+          // Ensure we always have two direction vectors (pad with zeros if needed)
+          while (directions.length < 2) {
+            directions.push({x: 0, y: 0});
+          }
+          
+          pt.directions = directions;
+
         }        
       }
       
       return pts;
 
+    },
+
+    tiles() {
+      // Expose intersection points as tiles for the drawing component
+      return this.intersectionPoints;
     },
 
     colors() {
