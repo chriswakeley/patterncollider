@@ -162,8 +162,8 @@ function sketch(parent) { // we pass the sketch data from the parent
           const rotateRad = p.radians(data.rotate);
           const cosRot = Math.cos(rotateRad);
           const sinRot = Math.sin(rotateRad);
-          const panX = data.pan * data.steps * preFactor * Math.sin(rotateRad);
-          const panY = data.pan * data.steps * preFactor * Math.cos(rotateRad);
+          const panX = data.pan * data.steps * preFactor / cosRot * -2.5;
+          const panY = 0;
           const halfWidth = p.width * 0.5;
           const halfHeight = p.height * 0.5;
           const radiusScale = 0.01 * data.radius * preFactor / data.zoom;
@@ -181,7 +181,6 @@ function sketch(parent) { // we pass the sketch data from the parent
               // Pre-calculate world position
               const worldX = tile.mean.x * preFactor;
               const worldY = tile.mean.y * preFactor;
-              console.log("panX:", panX, "panY:", panY, "worldX:", worldX, "worldY:", worldY);
               // Apply rotation and pan in one step
               const screenX = worldX * cosRot - worldY * sinRot + panX + halfWidth;
               const screenY = worldX * sinRot + worldY * cosRot + panY + halfHeight;
