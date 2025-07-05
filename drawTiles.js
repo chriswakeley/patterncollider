@@ -34,6 +34,13 @@ function sketch(parent) { // we pass the sketch data from the parent
     let uTileCountLoc;
     let uInterpolationPowerLoc;
 
+    // Performance optimization variables
+    let lastTileCount = -1;
+    let shaderReady = false;
+    let texturesDirty = false;
+    let needsRedraw = true;
+    let screenSizeDirty = true;
+
     // Keep hexToRgbFloat for now, might be useful later? Or remove if unused.
     function hexToRgbFloat(hex) {
       var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -145,94 +152,91 @@ function sketch(parent) { // we pass the sketch data from the parent
       tileCount = 0;
       
       if (!data.tiles || Object.keys(data.tiles).length === 0 || !p.width || !p.height) {
+        // Use typed array fill for better performance
         tilePositions.fill(0);
         tileDistances.fill(0);
       } else {
-          let tiles = Object.values(data.tiles);
-          let preFactor = data.zoom * Math.min(p.width, p.height) / data.steps;
-          let panOffset = p.createVector(data.pan * data.steps * preFactor, 0);
-          console.log("Pan Offset:", panOffset);
-          console.log("Pre Factor:", preFactor);
-          let rotateRad = p.radians(data.rotate);
-          panOffset.rotate(rotateRad);
-          //let effectiveZoom = Math.max(0.01, data.zoom); // Not directly needed here?
+          // Pre-calculate all constants outside the loop
+          const tiles = Object.values(data.tiles);
+          const preFactor = data.zoom * Math.min(p.width, p.height) / data.steps;
+          const rotateRad = p.radians(data.rotate);
+          const cosRot = Math.cos(rotateRad);
+          const sinRot = Math.sin(rotateRad);
+          const panX = data.pan * data.steps * preFactor * Math.sin(rotateRad);
+          const panY = data.pan * data.steps * preFactor * Math.cos(rotateRad);
+          const halfWidth = p.width * 0.5;
+          const halfHeight = p.height * 0.5;
+          const radiusScale = 0.01 * data.radius * preFactor / data.zoom;
           
-          for (let i = 0; i < tiles.length && i < MAX_TILES; i++) {
-              let tile = tiles[i];
-              if (!tile.mean || !tile.neighbors) continue; 
-
-              // Calculate screen position (center of canvas is 0,0 for shader)
-              let worldX = tile.mean.x * preFactor;
-              let worldY = tile.mean.y * preFactor;
-              let rotatedX = worldX * Math.cos(rotateRad) - worldY * Math.sin(rotateRad) + panOffset.x * -2.5;
-              let rotatedY = worldX * Math.sin(rotateRad) + worldY * Math.cos(rotateRad) + panOffset.y;
-              //let rotatedX = worldX * Math.cos(rotateRad) - worldY * Math.sin(rotateRad);
-              //let rotatedY = worldX * Math.sin(rotateRad) + worldY * Math.cos(rotateRad);
-
-              // Convert to pixel coordinates (origin top-left for frag shader gl_FragCoord)
-              let screenX = rotatedX + p.width / 2;
-              let screenY = rotatedY + p.height / 2; 
+          // Create typed array views for better cache locality
+          const posView = new Float32Array(tilePositions.buffer, 0, MAX_TILES * 2);
+          const distView = new Float32Array(tileDistances.buffer, 0, MAX_TILES);
+          
+          const maxTiles = Math.min(tiles.length, MAX_TILES);
+          
+          for (let i = 0; i < maxTiles; i++) {
+              const tile = tiles[i];
+              if (!tile.mean || !tile.neighbors) continue;
               
-              tilePositions[tileCount * 2 + 0] = screenX;
-              tilePositions[tileCount * 2 + 1] = screenY;
+              // Pre-calculate world position
+              const worldX = tile.mean.x * preFactor;
+              const worldY = tile.mean.y * preFactor;
+              console.log("panX:", panX, "panY:", panY, "worldX:", worldX, "worldY:", worldY);
+              // Apply rotation and pan in one step
+              const screenX = worldX * cosRot - worldY * sinRot + panX + halfWidth;
+              const screenY = worldX * sinRot + worldY * cosRot + panY + halfHeight;
               
-              // Calculate minDistance (raw value, shader will handle interpolation)
-              let neighbors = Object.values(tile.neighbors);
+              // Direct array access with pre-calculated index
+              const posIndex = tileCount << 1; // tileCount * 2
+              posView[posIndex] = screenX;
+              posView[posIndex + 1] = screenY;
               
-              let minDistance = Infinity;
-              if (neighbors.length >= 2 && neighbors[0].length >=1 && neighbors[1].length >=1) { // Basic check
-                   // This calculation seems complex and potentially error-prone
-                   // Re-check the neighbor structure and intended calculation if issues arise
-                   try { 
-                        minDistance = Math.min(
-                            // Check all 4 corner combinations between the two neighbor points/structures
-                            Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][0].y, 2)),
-                            neighbors[1].length > 1 ? Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][1].y, 2)) : Infinity,
-                            neighbors[0].length > 1 ? Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][0].y, 2)) : Infinity,
-                            (neighbors[0].length > 1 && neighbors[1].length > 1) ? Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][1].y, 2)) : Infinity
-                        );
-                        // Scale minDistance by preFactor like the original radius calculation did?
-                        // Let's scale it here to potentially keep values in a more manageable range
-                        minDistance = Math.pow((minDistance * (0.01 * data.radius)) * preFactor / data.zoom, data.dotSizePow) * data.dotSizeMult
-                   } catch(e) {
-                        console.error("Error calculating minDistance for tile:", tile, e);
-                        minDistance = 0; // Default on error
-                   }
-              } else {
-                   minDistance = 0; // Default if neighbors aren't as expected
-                   console.log("No neighbors found for tile:", tile);
+              // Optimized minDistance calculation
+              const neighbors = Object.values(tile.neighbors);
+              let minDistanceSq = Infinity;
+              
+              if (neighbors.length >= 2) {
+                const n0 = neighbors[0];
+                const n1 = neighbors[1];
+                
+                if (n0.length > 0 && n1.length > 0) {
+                  const maxLen0 = Math.min(2, n0.length);
+                  const maxLen1 = Math.min(2, n1.length);
+                  
+                  for (let i = 0; i < maxLen0; i++) {
+                    const p0 = n0[i];
+                    for (let j = 0; j < maxLen1; j++) {
+                      const p1 = n1[j];
+                      const dx = p0.x - p1.x;
+                      const dy = p0.y - p1.y;
+                      const distSq = dx * dx + dy * dy;
+                      if (distSq < minDistanceSq) minDistanceSq = distSq;
+                    }
+                  }
+                }
               }
-                   
-                  /*
-              let minDistance = Math.min(
-                Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][0].y, 2)),
-                Math.sqrt(Math.pow(neighbors[0][0].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][0].y - neighbors[1][1].y, 2)),
-                Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][0].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][0].y, 2)),
-                Math.sqrt(Math.pow(neighbors[0][1].x - neighbors[1][1].x, 2) + Math.pow(neighbors[0][1].y - neighbors[1][1].y, 2))
-              );
-              //console.log("minDistance:", minDistance);
-              minDistance = Math.pow((minDistance) * preFactor, data.dotSizePow) * data.dotSizeMult;
-              */
-              // TODO: Need to normalize or scale this minDistance appropriately 
-              //       before passing to shader, or handle normalization in shader.
-              //       For now, pass the scaled value. Consider its range.
-              tileDistances[tileCount] = minDistance; 
+
+              // Calculate final distance with pre-calculated scale
+              let minDistance = 0;
+              if (minDistanceSq < Infinity) {
+                minDistance = Math.pow(Math.sqrt(minDistanceSq) * radiusScale, data.dotSizePow) * data.dotSizeMult;
+              } else {
+                console.log("No valid neighbors found for tile:", tile);
+              }
               
+              distView[tileCount] = minDistance;
               tileCount++;
           }
-          // Zero out remaining slots if fewer than MAX_TILES
-          for (let i = tileCount; i < MAX_TILES; i++) {
-              tilePositions[i * 2 + 0] = 0;
-              tilePositions[i * 2 + 1] = 0;
-              tileDistances[i] = 0;
+          
+          // Zero remaining slots more efficiently
+          if (tileCount < MAX_TILES) {
+            posView.fill(0, tileCount * 2);
+            distView.fill(0, tileCount);
           }
       }
 
-      // Update textures
-      if (gl && tilePosTexture && tileDataTexture) { 
-           updateFloatTexture(tilePosTexture, TEXTURE_SIZE, TEXTURE_SIZE, tilePositions);
-           updateFloatTexture(tileDataTexture, TEXTURE_SIZE, TEXTURE_SIZE, tileDistances);
-      }
+      // Mark textures as needing update
+      texturesDirty = true;
     }
 
     p.preload = function() {
@@ -274,28 +278,49 @@ function sketch(parent) { // we pass the sketch data from the parent
       p.shader(brightnessShader); // Apply shader 
       getUniformLocations(); // Get locations for new shader
       setupAttributes(); // Setup quad attributes
+      shaderReady = true; // Mark shader as ready
       
       prepareData(parent.data); // Prepare initial data and textures
       
-      p.frameRate(30); // Set target frame rate for continuous draw
+      //p.frameRate(30); // Set target frame rate for continuous draw
     };
 
     p.draw = function() {
-      p.background(0); 
+      if (!needsRedraw) return;
       
+      // Skip p5's background() - it's doing extra work
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      
+      if (!shaderReady) return;
+      
+      // Direct WebGL calls without p5 wrapper overhead
       let program = brightnessShader._glProgram;
       gl.useProgram(program); // Ensure raw GL context uses the program
       
       // --- Set Uniforms ---
-      if (uScreenSizeLoc) {
+      // Screen size only needs updating on resize
+      if (screenSizeDirty && uScreenSizeLoc) {
           gl.uniform2f(uScreenSizeLoc, p.width, p.height);
+          screenSizeDirty = false;
       }
-      if (uTileCountLoc) {
-           gl.uniform1i(uTileCountLoc, tileCount); 
+      
+      // Only update uniforms that changed
+      if (lastTileCount !== tileCount && uTileCountLoc) {
+           gl.uniform1i(uTileCountLoc, tileCount);
+           lastTileCount = tileCount;
       }
+      
       if (uInterpolationPowerLoc) {
            // Make this controllable via parent.data later? 
            gl.uniform1f(uInterpolationPowerLoc, 2); // Default power of 2
+      }
+      
+      // Only update textures when data changed
+      if (texturesDirty && gl && tilePosTexture && tileDataTexture && tileCount > 0) {
+        updateFloatTexture(tilePosTexture, TEXTURE_SIZE, TEXTURE_SIZE, tilePositions);
+        updateFloatTexture(tileDataTexture, TEXTURE_SIZE, TEXTURE_SIZE, tileDistances);
+        texturesDirty = false;
       }
       
       // Bind textures
@@ -318,6 +343,7 @@ function sketch(parent) { // we pass the sketch data from the parent
            gl.enableVertexAttribArray(aPositionLoc);
       } else {
            console.error("aPosition attribute location invalid in draw loop.");
+           needsRedraw = false;
            return; // Don't draw if attribute isn't found
       }
       
@@ -330,6 +356,8 @@ function sketch(parent) { // we pass the sketch data from the parent
       gl.bindTexture(gl.TEXTURE_2D, null);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, null);
+      
+      needsRedraw = false;
     };
     
     // --- dataChanged and Mouse Interaction Logic ---
@@ -346,13 +374,15 @@ function sketch(parent) { // we pass the sketch data from the parent
              p.shader(brightnessShader); 
              getUniformLocations(); 
              setupAttributes(); 
+             screenSizeDirty = true; // Mark screen size as needing update
              parent.$emit('update:resize-completed'); 
              parent.$emit('update:width', newWidth); 
              parent.$emit('update:height', newHeight); 
           }
        }
        
-       prepareData(data); 
+       prepareData(data);
+       needsRedraw = true;
      };
 
     // Mouse interaction logic (getSelectedTile, mouseDragged, etc.)

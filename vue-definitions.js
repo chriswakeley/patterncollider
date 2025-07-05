@@ -71,48 +71,6 @@ var app = new Vue({
       return Math.sqrt(dx * dx + dy * dy);
     },
 
-    normalize(points) {
-
-      let numPts = points.length;
-
-      let xbar = 0;
-      let ybar = 0;
-      let dist = 0;
-
-      // find longest diagonal
-      for (let i = 0; i < numPts; i++) {
-        xbar += points[i].x;
-        ybar += points[i].y;
-        for (let j = i; j < numPts; j++) {
-          let d = this.dist(points[i].x, points[i].y, points[j].x, points[j].y);
-          if (d > dist) {
-            dist = d;
-            //angle = Math.atan2(points[j].y - points[i].y, points[j].x - points[i].x);
-          }
-        }
-      }
-
-      // calculate mean point
-      xbar /= numPts;
-      ybar /= numPts;
-
-      // subtract mean and normalize based on length of longest diagonal
-      return points.map(e => [50 * (e.x - xbar) / dist, 50 * (e.y - ybar) / dist]);
-
-    },
-
-    convertPointstoString(points) {
-      return points.map(e => String(e[0] + 25) + ',' + String(e[1] + 25)).reduce((a,b) => a + ' ' + b)
-    },
-
-    SVGPoints(color) {
-      return this.convertPointstoString(color.points);
-    },
-
-    SVGStyle(color) {
-      return 'fill: ' + color.fill + '; stroke: ' + this.rgbToHex(this.stroke, this.stroke, this.stroke) + '; stroke-width: 1;';
-    },
-
     clearSelection() {
       this.selectedTiles = [];
     },
@@ -208,12 +166,7 @@ var app = new Vue({
     togglePatternAnimation() {
         this.isAnimatingPattern = !this.isAnimatingPattern;
         if (this.isAnimatingPattern) {
-            console.log("Starting Pattern animation...");
-            this.animationPatternCenter = this.pattern; // Use current pattern as center
-        } else {
-            console.log("Stopping Pattern animation...");
-            // Optional: Reset pattern to the center value when stopping?
-            // this.pattern = this.animationPatternCenter; 
+            this.animationPatternPhase = 0; // Reset phase for consistent animation
         }
         this.startOrStopMainAnimationLoop();
     },
@@ -221,12 +174,7 @@ var app = new Vue({
     toggleDisorderAnimation() {
         this.isAnimatingDisorder = !this.isAnimatingDisorder;
         if (this.isAnimatingDisorder) {
-            console.log("Starting Disorder animation...");
-            this.animationDisorderCenter = this.disorder; // Use current disorder as center
-        } else {
-            console.log("Stopping Disorder animation...");
-            // Optional: Reset disorder to the center value when stopping?
-            // this.disorder = this.animationDisorderCenter;
+            this.animationDisorderPhase = 0; // Reset phase for consistent animation
         }
         this.startOrStopMainAnimationLoop();
     },
@@ -236,57 +184,87 @@ var app = new Vue({
         
         if (shouldBeAnimating && this.mainAnimationId === null) {
             // Start the loop
-            console.log("Starting main animation loop...");
-            this.mainAnimationStartTime = Date.now(); // Reset start time when loop begins
+            this.lastAnimationTime = performance.now();
             this.mainAnimateLoop(); 
         } else if (!shouldBeAnimating && this.mainAnimationId !== null) {
             // Stop the loop
-            console.log("Stopping main animation loop...");
             cancelAnimationFrame(this.mainAnimationId);
             this.mainAnimationId = null;
         }
     },
 
+    // Smooth triangle wave function that uses cosine for smooth turnarounds
+    smoothTriangle(phase) {
+        const normalizedPhase = phase % 1; // Keep phase in [0, 1] range
+        const x = normalizedPhase * 2 * Math.PI;
+        
+        // Create a smooth triangle wave using cosine blending at the peaks
+        // This avoids discontinuous derivatives at the turning points
+        const blendWidth = 0.1; // How much of the cycle to use for smoothing (10%)
+        const cyclePos = normalizedPhase * 4; // Position in the full cycle [0, 4]
+        
+        if (cyclePos < 1 - blendWidth) {
+            // Linear up
+            return cyclePos;
+        } else if (cyclePos < 1 + blendWidth) {
+            // Smooth turnaround at top using cosine
+            const t = (cyclePos - (1 - blendWidth)) / (2 * blendWidth);
+            return (1 - blendWidth) + blendWidth * (1 + Math.cos(Math.PI * t)) / 2;
+        } else if (cyclePos < 3 - blendWidth) {
+            // Linear down
+            return 2 - cyclePos;
+        } else if (cyclePos < 3 + blendWidth) {
+            // Smooth turnaround at bottom using cosine
+            const t = (cyclePos - (3 - blendWidth)) / (2 * blendWidth);
+            return -(1 - blendWidth) - blendWidth * (1 + Math.cos(Math.PI * t)) / 2;
+        } else {
+            // Linear up (completing the cycle)
+            return cyclePos - 4;
+        }
+    },
+
     mainAnimateLoop() {
-        // Calculate elapsed time relative to the main loop start
-        const elapsedMilliseconds = Date.now() - this.mainAnimationStartTime;
-        const elapsedSeconds = elapsedMilliseconds / 1000.0;
-
-        // --- Animation Parameters (can be moved to data later) ---
-        const patternAmplitude = 1.9; 
-        const patternSpeed = 0.005; // Oscillations per second
-        const disorderAmplitude = 0.9;
-        const disorderSpeed = 0.003; // Oscillations per second (different speed)
-        // ---------------------------------------------------------
-
+        const currentTime = performance.now();
+        const deltaTime = (currentTime - this.lastAnimationTime) / 1000; // Convert to seconds
+        this.lastAnimationTime = currentTime;
+        
+        // --- Animation Parameters ---
+        const patternSpeed = 0.005; // Cycles per second (full -1 to 1 to -1 cycle)
+        const disorderSpeed = 0.08; // Cycles per second (full 0 to 1 to 0 cycle)
+        
         let needsUpdate = false;
         
-        // Animate Pattern if active
+        // Animate Pattern if active (-1 to 1 range)
         if (this.isAnimatingPattern) {
-            const newPattern = this.animationPatternCenter + patternAmplitude * Math.sin(patternSpeed * 2 * Math.PI * elapsedSeconds);
-            // Check if value actually changed to avoid unnecessary updates if amplitude is 0
-            if (this.pattern !== newPattern) {
-                 this.pattern = newPattern;
-                 needsUpdate = true;
+            this.animationPatternPhase += patternSpeed * deltaTime;
+            const newPattern = this.smoothTriangle(this.animationPatternPhase);
+            
+            // Only update if change is significant (reduces unnecessary updates)
+            if (Math.abs(this.pattern - newPattern) > 0.001) {
+                this.pattern = newPattern;
+                needsUpdate = true;
             }
         }
 
-        // Animate Disorder if active
+        // Animate Disorder if active (0 to 1 range)
         if (this.isAnimatingDisorder) {
-            let newDisorder = this.animationDisorderCenter + disorderAmplitude * Math.sin(disorderSpeed * 2 * Math.PI * elapsedSeconds);
-            // Clamp disorder between 0 and 1 (or other valid range)
-            newDisorder = Math.max(0, Math.min(1, newDisorder)); 
-            if (this.disorder !== newDisorder) {
-                 this.disorder = newDisorder;
-                 needsUpdate = true;
+            this.animationDisorderPhase += disorderSpeed * deltaTime;
+            // Map the triangle wave from [-1, 1] to [0, 1]
+            const triangleValue = this.smoothTriangle(this.animationDisorderPhase);
+            const newDisorder = (triangleValue + 1) * 0.5;
+            
+            // Only update if change is significant
+            if (Math.abs(this.disorder - newDisorder) > 0.001) {
+                this.disorder = newDisorder;
+                needsUpdate = true;
             }
         }
 
-        // Schedule the next frame *only* if any animation is still active
+        // Schedule the next frame only if any animation is still active
         if (this.isAnimatingPattern || this.isAnimatingDisorder) {
-            this.mainAnimationId = requestAnimationFrame(this.mainAnimateLoop);
+            this.mainAnimationId = requestAnimationFrame(() => this.mainAnimateLoop());
         } else {
-             this.mainAnimationId = null; // Ensure ID is cleared if both stopped between frames
+            this.mainAnimationId = null;
         }
     },
     // ------------------------
@@ -325,24 +303,30 @@ var app = new Vue({
     },
 
     make1Dgrid() {
-      return Array(this.steps).fill(0).map((e,i) => i - (this.steps-1)/2).sort((a,b) => Math.abs(a) - Math.abs(b));
+      const result = new Array(this.steps);
+      const half = (this.steps - 1) / 2;
+      
+      for (let i = 0; i < this.steps; i++) {
+        result[i] = i - half;
+      }
+      
+      // Sort by absolute value more efficiently
+      return result.sort((a, b) => Math.abs(a) - Math.abs(b));
     },
 
     grid() { // dependencies: symmetry, steps, multiplier, offsets
-
-
-      let lines = [];
-
+      const lines = [];
+      const gridValues = this.make1Dgrid;
+      
       for (let i = 0; i < this.symmetry; i++) {
-        for (let n of this.make1Dgrid) {
-
+        const offset = this.offsets[i] % 1;
+        for (let j = 0; j < gridValues.length; j++) {
           // grid is a set of tuples of {angle: angle, index: index} for each grid line
           // TODO fix degeneracy issue: there can be multiple lines that coincide
           lines.push({
             angle: i,
-            index: n + this.offsets[i] % 1
+            index: gridValues[j] + offset
           });
-
         }
       }
 
@@ -388,71 +372,96 @@ var app = new Vue({
 
       if (this.width && this.height) {
 
-        this.grid.forEach((line1, i) => {
-          this.grid.forEach((line2, j) => {
-            if (line1.angle < line2.angle) {
+        // Pre-calculate frequently used values
+        const halfWidth = this.width / 2 + this.spacing;
+        const halfHeight = this.height / 2 + this.spacing;
+        const maxDistSq = this.steps === 1 ? 0.25 * this.steps * this.steps : 0.25 * (this.steps - 1) * (this.steps - 1);
+        const rotationAngle = this.rotate * Math.PI / 180;
+        const cosRot = Math.cos(rotationAngle);
+        const sinRot = Math.sin(rotationAngle);
+        const gridLength = this.grid.length;
 
-              let sc1 = this.sinCosTable[line1.angle];
-              let s1 = sc1.sin;
-              let c1 = sc1.cos;
-
-              let sc2 = this.sinCosTable[line2.angle];
-              let s2 = sc2.sin;
-              let c2 = sc2.cos;
-
-              let s12 = s1 * c2 - c1 * s2;
-              let s21 = -s12;
-
-              // avoid edge case where angle difference = 60 degrees
-              if (Math.abs(s12) > this.epsilon) {
-
-                let x = (line2.index * s1 - line1.index * s2) / s12;
-                let y = (line2.index * c1 - line1.index * c2) / s21;
-
-                let rotationAngle = this.rotate * Math.PI / 180;
-                let xprime = x * Math.cos(rotationAngle) - y * Math.sin(rotationAngle);
-                let yprime = x * Math.sin(rotationAngle) + y * Math.cos(rotationAngle);
-
-                // optimization: only list intersection points viewable on screen
-                // this ensures we don't draw or compute tiles that aren't visible
-                if (Math.abs(xprime * this.spacing) <= this.width / 2 + this.spacing 
-                && Math.abs(yprime * this.spacing) <= this.height / 2 + this.spacing) {
-
-                  // this check ensures that we only draw tiles that are connected to other tiles
-                  if ((this.steps == 1 && this.dist(x,y,0,0) <= 0.5 * this.steps) 
-                                       || this.dist(x,y,0,0) <= 0.5 * (this.steps - 1)) {
-                    let index = JSON.stringify([this.approx(x), this.approx(y)]);
-                    if (pts[index]) {
-                      if (!pts[index].lines.includes(line1)) {
-                        pts[index].lines.push(line1);
-                      }
-                      if (!pts[index].lines.includes(line2)) {
-                        pts[index].lines.push(line2);
-                      }
-                    } else {
-                      pts[index] = {};
-                      pts[index].x = x;
-                      pts[index].y = y;
-                      pts[index].lines = [line1, line2];
-                      
-                      pts[index].neighbors = {[i]: [], [j]: []};
-                      pts[index].idx = index;
-                      linepts[i].push(pts[index]);
-                      linepts[j].push(pts[index]);
-                    }
-                  }
-
-                }
-              }
-            }
-          });
-        });
-        linepts.forEach((line, j) => {
-          line.sort((a,b)=>{if(a.y < b.y){ return -1};if(a.y > b.y){return 1};return 0}).forEach((ipt, i, ipts) => {
-           
-            pts[ipt.idx].neighbors[j].push({x: pts[ipts[Math.max(0, i-1)].idx].x, y: pts[ipts[Math.max(0, i-1)].idx].y}, {x: pts[ipts[Math.min(ipts.length-1, i+1)].idx].x, y: pts[ipts[Math.min(ipts.length-1, i+1)].idx].y});
-          })
+        // Use index-based iteration for better performance
+        for (let i = 0; i < gridLength; i++) {
+          const line1 = this.grid[i];
+          const sc1 = this.sinCosTable[line1.angle];
+          const s1 = sc1.sin;
+          const c1 = sc1.cos;
           
+          for (let j = i + 1; j < gridLength; j++) { // Start from i+1 to avoid duplicate checks
+            const line2 = this.grid[j];
+            
+            if (line1.angle >= line2.angle) continue; // Skip if not in correct order
+            
+            const sc2 = this.sinCosTable[line2.angle];
+            const s2 = sc2.sin;
+            const c2 = sc2.cos;
+            
+            const s12 = s1 * c2 - c1 * s2;
+            
+            // Skip if parallel or near-parallel
+            if (Math.abs(s12) <= this.epsilon) continue;
+            
+            const s12_inv = 1 / s12; // Pre-calculate reciprocal
+            const x = (line2.index * s1 - line1.index * s2) * s12_inv;
+            const y = (line2.index * c1 - line1.index * c2) * -s12_inv;
+            
+            // Early distance check before rotation (using squared distance to avoid sqrt)
+            const distSq = x * x + y * y;
+            if (distSq > maxDistSq) continue;
+            
+            // Apply rotation
+            const xprime = x * cosRot - y * sinRot;
+            const yprime = x * sinRot + y * cosRot;
+            
+            // View bounds check
+            if (Math.abs(xprime * this.spacing) > halfWidth || 
+                Math.abs(yprime * this.spacing) > halfHeight) continue;
+            
+            // Use more efficient key generation instead of JSON.stringify
+            const keyX = Math.round(x * this.inverseEpsilon);
+            const keyY = Math.round(y * this.inverseEpsilon);
+            const index = `${keyX},${keyY}`;
+            
+            if (pts[index]) {
+              if (!pts[index].lines.includes(line1)) {
+                pts[index].lines.push(line1);
+              }
+              if (!pts[index].lines.includes(line2)) {
+                pts[index].lines.push(line2);
+              }
+            } else {
+              pts[index] = {
+                x: x,
+                y: y,
+                lines: [line1, line2],
+                neighbors: {[i]: [], [j]: []},
+                idx: index
+              };
+              linepts[i].push(pts[index]);
+              linepts[j].push(pts[index]);
+            }
+          }
+        }
+        // Optimize neighbors calculation
+        linepts.forEach((line, j) => {
+          if (line.length === 0) return; // Skip empty lines
+          
+          // Sort once and reuse
+          const sortedLine = line.sort((a,b) => a.y - b.y);
+          const lineLength = sortedLine.length;
+          
+          sortedLine.forEach((ipt, i) => {
+            const prevIdx = Math.max(0, i - 1);
+            const nextIdx = Math.min(lineLength - 1, i + 1);
+            const prevPt = pts[sortedLine[prevIdx].idx];
+            const nextPt = pts[sortedLine[nextIdx].idx];
+            
+            pts[ipt.idx].neighbors[j].push(
+              {x: prevPt.x, y: prevPt.y}, 
+              {x: nextPt.x, y: nextPt.y}
+            );
+          });
         });
 
         // calculate dual points to intersection points
@@ -464,76 +473,48 @@ var app = new Vue({
           // numerical sort angles and remove duplicates (e.g. due to degeneracy when phase = 0)
           angles = [...angles, ...angles2].map(e => this.approx(e)).sort((a,b) => a - b).filter((e, i, arr) => arr.indexOf(e) == i);
 
-          // calculate points offset along these edges
-          let offsetPts = [];
-          for (let angle of angles) {
-            let x = pt.x + this.epsilon * -Math.sin(angle);
-            let y = pt.y + this.epsilon * Math.cos(angle);
-            offsetPts.push({
-              x:x,
-              y:y
-            });
-          }
-          
-          // calculate medians of these offset points
-          let medianPts = [];
-          let iMax = offsetPts.length;
-          for (let i = 0; i < iMax; i++) {
-            let x0 = offsetPts[i].x;
-            let y0 = offsetPts[i].y;
-            let x1 = offsetPts[ (i+1) % iMax ].x;
-            let y1 = offsetPts[ (i+1) % iMax ].y;
-            
-            let xm = (x0 + x1) / 2;
-            let ym = (y0 + y1) / 2;
-
-            medianPts.push({
-              x: xm, 
-              y: ym});
-          }
-
-          // calculate dual of these median points      
-          let dualPts = [];
+          // Calculate mean directly without storing dual points
           let mean = {x: 0, y: 0};
+          
+          // Pre-calculate sin/cos table references
+          const sinCosRefs = this.sinCosTable;
+          const offsetsRefs = this.offsets;
+          const epsilonNeg = -this.epsilon;
+          
+          // Process each angle pair to create median points and their duals
+          const angleCount = angles.length;
+          for (let i = 0; i < angleCount; i++) {
+            const angle0 = angles[i];
+            const angle1 = angles[(i + 1) % angleCount];
             
-          for (let myPt of medianPts) {
+            // Calculate median point directly
+            const xm = pt.x + epsilonNeg * 0.5 * (Math.sin(angle0) + Math.sin(angle1));
+            const ym = pt.y + this.epsilon * 0.5 * (Math.cos(angle0) + Math.cos(angle1));
+            
+            // Calculate dual point and accumulate for mean
             let xd = 0;
             let yd = 0;
-
-            for (let i = 0; i < this.symmetry; i++) {
-              let ci = this.sinCosTable[i].cos;
-              let si = this.sinCosTable[i].sin;
-
-              let k = Math.floor(myPt.x * ci + myPt.y * si - this.offsets[i]);
-
-              xd += k * ci;
-              yd += k * si;
+            
+            for (let j = 0; j < this.symmetry; j++) {
+              const cj = sinCosRefs[j].cos;
+              const sj = sinCosRefs[j].sin;
+              const k = Math.floor(xm * cj + ym * sj - offsetsRefs[j]);
+              
+              xd += k * cj;
+              yd += k * sj;
             }
-
-            dualPts.push({
-              x: xd, 
-              y: yd
-            });
+            
+            // Accumulate for mean calculation
             mean.x += xd;
             mean.y += yd;
-
           }
-
-          let dMax = dualPts.length;
-          mean.x /= dMax;
-          mean.y /= dMax;
-
-          // compute area using determinant method
-          let area = 0;
-          for (let i = 0; i < dMax; i++) {
-            area += 0.5 * (dualPts[i].x * dualPts[(i+1) % dMax].y - dualPts[i].y * dualPts[(i+1) % dMax].x);
-          }
-
-          area = String(Math.round(1000 * area) / 1000);
-          pt.area = area;
+          
+          // Finalize mean
+          mean.x /= angleCount;
+          mean.y /= angleCount;
+          
           pt.numVertices = angles.length;
           pt.angles = JSON.stringify(angles);
-          pt.dualPts = dualPts;
           pt.mean = mean;
 
         }        
@@ -550,46 +531,6 @@ var app = new Vue({
       let end = [this.hue - this.hueRange, this.sat, lightness - this.contrast];
       
       return [start, end];
-    },
-
-    colorPalette() {
-
-      let protoTiles = Object.values(this.intersectionPoints); // get a list of all tiles
-      const filterFunction = (e,f) => this.orientationColoring ? e.angles == f.angles : e.area == f.area; // we can pick tiles by orientation or area
-      protoTiles = protoTiles.filter((e, i, arr) => arr.findIndex(f => filterFunction(e,f)) == i); // pick 1 tile of each type using the function above
-      protoTiles = protoTiles.sort((a,b) => a.numVertices - b.numVertices); // then sort by number of vertices
-
-      let numTiles = protoTiles.length; 
-
-      let start = this.colors[0];
-      let end = this.colors[1];
-
-      let i = 0;
-      let colorPalette = [];
-      let range = numTiles - 1/2;
-
-      for (let tile of protoTiles) {
-        let h = this.lerp(start[0], end[0], i / range) % 360;
-        let s = this.lerp(start[1], end[1], i / range);
-        let l = this.lerp(start[2], end[2], i / range);
-        let color = hsluv.hsluvToRgb([h, s, l]).map(e => Math.round(255 * e));
-        colorPalette.push({
-          fill: this.rgbToHex(...color),
-          points: this.normalize(tile.dualPts),
-          area: tile.area,
-          angles: tile.angles,
-        });
-
-        i++;
-      }
-
-      if (this.reverseColors) {
-        let reversedColorPalette = colorPalette.map(e => e.fill).reverse();
-        colorPalette.forEach((e,i) => e.fill = reversedColorPalette[i]);
-      }
-
-      return colorPalette;
-
     },
 
     canvasDisplaySetting() {
@@ -700,6 +641,7 @@ var app = new Vue({
 
   data: {
     dataBackup: {},
+    // Add caching for intersection points
     urlParameters: ['symmetry', 'pattern', 'pan', 'disorder', 'randomSeed', 'radius', 'zoom', 'rotate', 'colorTiles', 'showIntersections', 'stroke', 'showStroke', 'hue', 'hueRange', 'contrast', 'sat', 'reverseColors', 'orientationColoring', 'dotSizeMult', 'dotSizePow'],
     symmetry: 5,
     radius: 100,
@@ -741,11 +683,11 @@ var app = new Vue({
     ],
     appDescription: 'Pattern Collider Vue App',
     isAnimatingPattern: false,
-    animationPatternCenter: null,
-    mainAnimationId: null,
-    mainAnimationStartTime: null,
     isAnimatingDisorder: false,
-    animationDisorderCenter: null,
+    mainAnimationId: null,
+    lastAnimationTime: null,
+    animationPatternPhase: 0,
+    animationDisorderPhase: 0,
   }
 
 });

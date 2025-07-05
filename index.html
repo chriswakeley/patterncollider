@@ -80,7 +80,6 @@
           multiplier: multiplier,
           zoom: zoom,
           colorTiles: colorTiles,
-          colors: colorPalette,
           selectedTiles: selectedTiles,
           display: canvasDisplaySetting,
           symmetry: symmetry,
@@ -257,15 +256,6 @@
       <div>
         <input class="slider" type="range" id="contrast" v-model.number="contrast" min="0" max="50" step="1" :disabled="!colorTiles"></input>
         <label for="contrast" :class="colorTiles ? '' : 'grey'">Contrast</label>
-      </div>
-
-      <div style="width: auto; height: auto;">
-        <div>Tiles</div>
-        <div class="row" style="display: inline-block;">
-          <svg v-for="tile in colorPalette" height = "50" width="50">
-            <polygon :points="SVGPoints(tile)" :style="SVGStyle(tile)">
-          </svg>
-        </div>
       </div>
 
     </div>

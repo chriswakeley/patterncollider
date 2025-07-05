@@ -63,7 +63,7 @@ void main() {
       // Inverse distance weighting
       // Clamp distance to avoid extremely large weights near centers
       //float weight = 1.0 / pow(max(dist, 1.0), uInterpolationPower);
-      float weight = 1.0 /(pow(dist + 1.0, uInterpolationPower) * pow(tileBrightness, -2.0));
+      float weight = tileBrightness * tileBrightness / (dist * dist + 2.0 * dist + 1.0);
       
       totalBrightness += weight * tileBrightness;
       //totalBrightness += tileBrightness * 0.001;
@@ -71,7 +71,7 @@ void main() {
   }
 
   // Calculate final brightness and handle division by zero
-  float finalBrightness = (totalWeight > EPSILON) ? totalBrightness / totalWeight : 0.0;
+  float finalBrightness = (totalWeight > EPSILON) ? totalBrightness / totalWeight: 0.0;
   
   // --- Normalization / Scaling ---
   // The raw minDistance values might be large. We need to scale them to a 0-1 range.
