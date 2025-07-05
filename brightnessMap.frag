@@ -84,11 +84,13 @@ void main() {
       // float lineAngle = acos(clamp(dot(direction1, direction2), -1.0, 1.0));
       
       // Inverse distance weighting with optional directional modulation
-      float weight = tileBrightness * tileBrightness / (1.0 + directionalWeight * 30.0) / (dist * dist + 2.0 * dist + 1.0);
+      float angleWeight = (1.0 + directionalWeight * 30.0);
+      float weight = tileBrightness * tileBrightness / angleWeight / (dist * dist + 2.0 * dist + 1.0);
       // Optionally modulate by directional alignment:
       //weight *= (1.0 + directionalWeight * 30.0); // Enhance weight along line directions
       
-      totalBrightness += weight * tileBrightness;
+      
+      totalBrightness += weight * tileBrightness + (angleWeight * weight);
       totalWeight += weight;
   }
 

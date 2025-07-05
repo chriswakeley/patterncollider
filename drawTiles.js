@@ -244,10 +244,6 @@ function sketch(parent) { // we pass the sketch data from the parent
                 dir1Y = tile.directions[0].y;
                 dir2X = tile.directions[1].x;
                 dir2Y = tile.directions[1].y;
-                // Debug: log first few tiles to verify directions are working
-                if (tileCount < 3) {
-                  console.log(`Tile ${tileCount}: directions = [${dir1X.toFixed(3)}, ${dir1Y.toFixed(3)}], [${dir2X.toFixed(3)}, ${dir2Y.toFixed(3)}]`);
-                }
               }
               
               // Store direction vectors
