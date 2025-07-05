@@ -35,8 +35,10 @@ void main() {
   // vScreenCoord is 0-1 (bottom-left origin), need to flip Y for pixel coords
   vec2 fragCoordPixels = vec2(vScreenCoord.x, 1.0 - vScreenCoord.y) * uScreenSize;
 
-  float totalWeight = 0.0;
-  float totalBrightness = 0.0;
+  float totalWeight1 = 0.0;
+  float totalBrightness1 = 0.0;
+  float totalWeight2 = 0.0;
+  float totalBrightness2 = 0.0;
   float maxTileCount = min(float(uTileCount), TEXTURE_SIZE * TEXTURE_SIZE); // Ensure we don't exceed texture bounds
 
   for (int i = 0; i < 16384; i++) { // Max iterations based on TEXTURE_SIZE*TEXTURE_SIZE
@@ -64,8 +66,10 @@ void main() {
       float dist = distance(fragCoordPixels, tilePosPixels);
 
       if (dist < EPSILON) { 
-          totalBrightness = tileBrightness;
-          totalWeight = 1.0;
+          totalBrightness1 = tileBrightness;
+          totalWeight1 = 1.0;
+          totalBrightness2 = tileBrightness;
+          totalWeight2 = 1.0;
           break; // We are exactly at a tile center
       }
       
@@ -74,28 +78,38 @@ void main() {
       vec2 fragToTile = normalize(tilePosPixels - fragCoordPixels);
       
       // Calculate alignment with line directions (0 = perpendicular, 1 = parallel)
-      float alignment1 = abs(dot(fragToTile, direction1));
-      float alignment2 = abs(dot(fragToTile, direction2));
+      float align1 = abs(dot(fragToTile, direction1));
+      float align2 = abs(dot(fragToTile, direction2));
       
       // Use maximum alignment to create directional emphasis
-      float directionalWeight = max(alignment1, alignment2);
-      
+      //float directionalWeight = max(alignment1, alignment2);
+      float alignment1 = max(align1, align2);
+      float alignment2 = min(align1, align2);
+
+
       // You could also calculate the angle between the two lines:
       // float lineAngle = acos(clamp(dot(direction1, direction2), -1.0, 1.0));
       
       // Inverse distance weighting with optional directional modulation
-      float angleWeight = (1.0 + directionalWeight * 30.0);
-      float weight = tileBrightness * tileBrightness / angleWeight / (dist * dist + 2.0 * dist + 1.0);
+      float angleWeight1 = (1.0 + alignment1 * 30.0);
+      float angleWeight2 = (1.0 + alignment2 * 30.0);
+      float weight1 = tileBrightness * tileBrightness / angleWeight1 / (dist * dist + 2.0 * dist + 1.0);
+      float weight2 = tileBrightness * tileBrightness / angleWeight2 / (dist * dist + 2.0 * dist + 1.0);
       // Optionally modulate by directional alignment:
       //weight *= (1.0 + directionalWeight * 30.0); // Enhance weight along line directions
       
       
-      totalBrightness += weight * tileBrightness + (angleWeight * weight);
-      totalWeight += weight;
+      //totalBrightness += weight * tileBrightness + (angleWeight * weight);
+      //totalWeight += weight;
+      totalBrightness1 += weight1 * tileBrightness;
+      totalWeight1 += weight1 - (angleWeight1 * weight1 * 0.02);
+      totalBrightness2 += weight2 * tileBrightness;
+      totalWeight2 += weight2 - (angleWeight2 * weight2 * 0.02);
   }
 
   // Calculate final brightness and handle division by zero
-  float finalBrightness = (totalWeight > EPSILON) ? totalBrightness / totalWeight: 0.0;
+  float finalBrightness1 = (totalWeight1 > EPSILON) ? totalBrightness1 / totalWeight1: 0.0;
+  float finalBrightness2 = (totalWeight2 > EPSILON) ? totalBrightness2 / totalWeight2: 0.0;
   
   // --- Normalization / Scaling ---
   // The raw minDistance values might be large. We need to scale them to a 0-1 range.
@@ -104,8 +118,9 @@ void main() {
   
   // Option 2: Normalize based on some factor (e.g., related to canvas size or zoom) 
   // This needs adjustment based on visual results. Let's try a simple division.
-  finalBrightness = 1.0 - clamp(finalBrightness / 100.0, 0.0, 1.0); // Arbitrary scaling factor
+  finalBrightness1 = 1.0 - clamp(finalBrightness1 / 100.0, 0.0, 1.0); // Arbitrary scaling factor
+  finalBrightness2 = 1.0 - clamp(finalBrightness2 / 100.0, 0.0, 1.0); // Arbitrary scaling factor
 
   // Output final grayscale color
-  gl_FragColor = vec4(vec3(finalBrightness), 1.0);
+  gl_FragColor = vec4(vec3(finalBrightness1, finalBrightness2,1.0), 1.0);
 } 
