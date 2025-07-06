@@ -236,14 +236,9 @@ var app = new Vue({
         
         // Animate Pattern if active (-1 to 1 range)
         if (this.isAnimatingPattern) {
-            this.animationPatternPhase += patternSpeed * deltaTime;
-            const newPattern = this.smoothTriangle(this.animationPatternPhase);
-            
-            // Only update if change is significant (reduces unnecessary updates)
-            if (Math.abs(this.pattern - newPattern) > 0.001) {
-                this.pattern = newPattern;
-                needsUpdate = true;
-            }
+            this.animationPatternPhase += patternSpeed * 0.032;
+            this.pattern = this.smoothTriangle(this.animationPatternPhase);
+            needsUpdate = true;
         }
 
         // Animate Disorder if active (0 to 1 range)

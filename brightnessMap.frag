@@ -1,126 +1,107 @@
 /* brightnessMap.frag */
 #ifdef GL_ES
-precision highp float; // Use high precision for calculations
-precision highp int;   // Use high precision for loop counters
+precision highp float;
+precision highp int;
 #endif
 
-// Varying input from vertex shader
-varying vec2 vScreenCoord; // Screen coordinates (0.0 to 1.0)
+// Varyings
+varying vec2 vScreenCoord;
 
 // Uniforms
-uniform sampler2D uTilePositions; // Texture with tile XY pixel coords (packed in RGBA)
-uniform sampler2D uTileData;      // Texture with tile minDistance (packed in RGBA, use R)
-uniform sampler2D uTileDirections1; // Texture with first line direction vectors (packed in RGBA, use RG)
-uniform sampler2D uTileDirections2; // Texture with second line direction vectors (packed in RGBA, use RG)
-uniform int uTileCount;           // Number of active tiles
-uniform vec2 uScreenSize;         // Canvas dimensions in pixels
-uniform float uInterpolationPower;  // Power for inverse distance weighting (e.g., 2.0)
+uniform sampler2D uTilePositions;   // Tile XY pixel coords (RG channels)
+uniform sampler2D uTileData;        // Tile minDistance (R channel)
+uniform sampler2D uTileDirections1; // First line direction vectors (RG channels)
+uniform sampler2D uTileDirections2; // Second line direction vectors (RG channels)
+uniform int uTileCount;
+uniform vec2 uScreenSize;
+uniform float uInterpolationPower;  // Currently unused
 
 // Constants
-const float EPSILON = 1e-60; // Small value to avoid division by zero
-const float TEXTURE_SIZE = 128.0; // Must match JS: Texture dimensions (TEXTURE_SIZE x TEXTURE_SIZE)
-const float MAX_BRIGHTNESS_CLAMP = 50.0; // Clamp max brightness to avoid extreme values
+const float EPSILON = 1e-60;
+const float TEXTURE_SIZE = 128.0;
+const float INV_TEXTURE_SIZE = 1.0 / 128.0;
+const float TEXTURE_CENTER_OFFSET = 0.5;
+const int MAX_ITERATIONS = 16384; // TEXTURE_SIZE * TEXTURE_SIZE
 
-// Helper function to get texture coordinates for 1D index in 2D texture
+// Precomputed constants for performance
+const float DIRECTION_SCALE = 30.0;
+const float ANGLE_WEIGHT_SCALE = 0.02;
+const float BRIGHTNESS_SCALE = 0.01; // 1.0 / 100.0
+
+// Convert 1D index to 2D texture coordinates
 vec2 getTexCoord(int index) {
-    float i_float = float(index);
-    float row = floor(i_float / TEXTURE_SIZE);
-    float col = mod(i_float, TEXTURE_SIZE);
-    // Add 0.5 to sample center of texel
-    return vec2((col + 0.5) / TEXTURE_SIZE, (row + 0.5) / TEXTURE_SIZE);
+    float indexFloat = float(index);
+    float row = floor(indexFloat * INV_TEXTURE_SIZE);
+    float col = indexFloat - row * TEXTURE_SIZE;
+    return vec2(
+        (col + TEXTURE_CENTER_OFFSET) * INV_TEXTURE_SIZE,
+        (row + TEXTURE_CENTER_OFFSET) * INV_TEXTURE_SIZE
+    );
 }
 
 void main() {
-  // Get current fragment coordinate in pixels (origin top-left)
-  // vScreenCoord is 0-1 (bottom-left origin), need to flip Y for pixel coords
-  vec2 fragCoordPixels = vec2(vScreenCoord.x, 1.0 - vScreenCoord.y) * uScreenSize;
+    // Convert normalized coords to pixel coords (flip Y for top-left origin)
+    vec2 fragCoordPixels = vec2(vScreenCoord.x, 1.0 - vScreenCoord.y) * uScreenSize;
 
-  float totalWeight1 = 0.0;
-  float totalBrightness1 = 0.0;
-  float totalWeight2 = 0.0;
-  float totalBrightness2 = 0.0;
-  float maxTileCount = min(float(uTileCount), TEXTURE_SIZE * TEXTURE_SIZE); // Ensure we don't exceed texture bounds
+    // Accumulation variables
+    float totalWeight1 = 0.0;
+    float totalBrightness1 = 0.0;
+    float totalWeight2 = 0.0;
+    float totalBrightness2 = 0.0;
 
-  for (int i = 0; i < 16384; i++) { // Max iterations based on TEXTURE_SIZE*TEXTURE_SIZE
-      if (i >= uTileCount) {
-          break; // Exit loop if we've processed all active tiles
-      }
+    // Process all active tiles
+    for (int i = 0; i < MAX_ITERATIONS; i++) {
+        if (i >= uTileCount) break;
 
-      vec2 texCoord = getTexCoord(i);
-      
-      // Sample tile data
-      vec4 posData = texture2D(uTilePositions, texCoord);
-      vec2 tilePosPixels = posData.xy; // Position stored in R, G
-      
-      vec4 data = texture2D(uTileData, texCoord);
-      float tileBrightness = data.r; // minDistance stored in R
-      
-      // Sample direction data
-      vec4 dir1Data = texture2D(uTileDirections1, texCoord);
-      vec2 direction1 = dir1Data.xy; // First line direction stored in R, G
-      
-      vec4 dir2Data = texture2D(uTileDirections2, texCoord);
-      vec2 direction2 = dir2Data.xy; // Second line direction stored in R, G
-      
-      // --- Interpolation --- 
-      float dist = distance(fragCoordPixels, tilePosPixels);
+        vec2 texCoord = getTexCoord(i);
+        
+        // Sample all textures at once
+        vec2 tilePosPixels = texture2D(uTilePositions, texCoord).xy;
+        float tileBrightness = texture2D(uTileData, texCoord).r;
+        vec2 direction1 = texture2D(uTileDirections1, texCoord).xy;
+        vec2 direction2 = texture2D(uTileDirections2, texCoord).xy;
+        
+        // Calculate distance to tile
+        float dist = distance(fragCoordPixels, tilePosPixels);
+        
+        // Calculate directional alignment
+        vec2 fragToTile = normalize(tilePosPixels - fragCoordPixels);
+        float align1 = abs(dot(fragToTile, direction1));
+        float align2 = abs(dot(fragToTile, direction2));
+        
+        // Determine primary and secondary alignments
+        float alignment1 = max(align1, align2);
+        float alignment2 = min(align1, align2);
 
-      if (dist < EPSILON) { 
-          totalBrightness1 = tileBrightness;
-          totalWeight1 = 1.0;
-          totalBrightness2 = tileBrightness;
-          totalWeight2 = 1.0;
-          break; // We are exactly at a tile center
-      }
-      
-      // --- Example: Use direction vectors for anisotropic effects ---
-      // Calculate vector from fragment to tile center
-      vec2 fragToTile = normalize(tilePosPixels - fragCoordPixels);
-      
-      // Calculate alignment with line directions (0 = perpendicular, 1 = parallel)
-      float align1 = abs(dot(fragToTile, direction1));
-      float align2 = abs(dot(fragToTile, direction2));
-      
-      // Use maximum alignment to create directional emphasis
-      //float directionalWeight = max(alignment1, alignment2);
-      float alignment1 = max(align1, align2);
-      float alignment2 = min(align1, align2);
+        // Calculate angle-based weights
+        float angleWeight1 = 1.0 + alignment1 * DIRECTION_SCALE;
+        float angleWeight2 = 1.0 + alignment2 * DIRECTION_SCALE;
+        
+        // Calculate distance weights with angle modulation
+        float brightnessSquared = tileBrightness * tileBrightness;
+        float distanceFactor = dist * dist + 2.0 * dist + 1.0;
+        
+        float weight1 = brightnessSquared / (angleWeight1 * distanceFactor);
+        float weight2 = brightnessSquared / (angleWeight2 * distanceFactor);
+        
+        // Accumulate weighted values
+        totalBrightness1 += weight1 * tileBrightness;
+        totalWeight1 += weight1 * (1.0 - angleWeight1 * ANGLE_WEIGHT_SCALE);
+        
+        totalBrightness2 += weight2 * tileBrightness;
+        totalWeight2 += weight2 * (1.0 - angleWeight2 * ANGLE_WEIGHT_SCALE);
+    }
 
+    // Calculate final brightness values with safe division
+    float finalBrightness1 = (totalWeight1 > EPSILON) ? 
+        totalBrightness1 / totalWeight1 : 0.0;
+    float finalBrightness2 = (totalWeight2 > EPSILON) ? 
+        totalBrightness2 / totalWeight2 : 0.0;
+    
+    // Normalize and invert brightness (dark to light)
+    finalBrightness1 = 1.0 - clamp(finalBrightness1 * BRIGHTNESS_SCALE, 0.0, 1.0);
+    finalBrightness2 = 1.0 - clamp(finalBrightness2 * BRIGHTNESS_SCALE, 0.0, 1.0);
 
-      // You could also calculate the angle between the two lines:
-      // float lineAngle = acos(clamp(dot(direction1, direction2), -1.0, 1.0));
-      
-      // Inverse distance weighting with optional directional modulation
-      float angleWeight1 = (1.0 + alignment1 * 30.0);
-      float angleWeight2 = (1.0 + alignment2 * 30.0);
-      float weight1 = tileBrightness * tileBrightness / angleWeight1 / (dist * dist + 2.0 * dist + 1.0);
-      float weight2 = tileBrightness * tileBrightness / angleWeight2 / (dist * dist + 2.0 * dist + 1.0);
-      // Optionally modulate by directional alignment:
-      //weight *= (1.0 + directionalWeight * 30.0); // Enhance weight along line directions
-      
-      
-      //totalBrightness += weight * tileBrightness + (angleWeight * weight);
-      //totalWeight += weight;
-      totalBrightness1 += weight1 * tileBrightness;
-      totalWeight1 += weight1 - (angleWeight1 * weight1 * 0.02);
-      totalBrightness2 += weight2 * tileBrightness;
-      totalWeight2 += weight2 - (angleWeight2 * weight2 * 0.02);
-  }
-
-  // Calculate final brightness and handle division by zero
-  float finalBrightness1 = (totalWeight1 > EPSILON) ? totalBrightness1 / totalWeight1: 0.0;
-  float finalBrightness2 = (totalWeight2 > EPSILON) ? totalBrightness2 / totalWeight2: 0.0;
-  
-  // --- Normalization / Scaling ---
-  // The raw minDistance values might be large. We need to scale them to a 0-1 range.
-  // Option 1: Simple clamp and scale (requires knowing typical range)
-  // finalBrightness = clamp(finalBrightness / MAX_BRIGHTNESS_CLAMP, 0.0, 1.0);
-  
-  // Option 2: Normalize based on some factor (e.g., related to canvas size or zoom) 
-  // This needs adjustment based on visual results. Let's try a simple division.
-  finalBrightness1 = 1.0 - clamp(finalBrightness1 / 100.0, 0.0, 1.0); // Arbitrary scaling factor
-  finalBrightness2 = 1.0 - clamp(finalBrightness2 / 100.0, 0.0, 1.0); // Arbitrary scaling factor
-
-  // Output final grayscale color
-  gl_FragColor = vec4(vec3(finalBrightness1, finalBrightness2,1.0), 1.0);
-} 
+    // Output final color
+    gl_FragColor = vec4(finalBrightness1, finalBrightness2, 1.0, 1.0);
+}
