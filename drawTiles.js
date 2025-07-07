@@ -229,21 +229,27 @@ function sketch(parent) { // we pass the sketch data from the parent
               
               distView[tileCount] = minDistance;
               
-              // Use pre-calculated directions from Vue
-              let dir1X = 0, dir1Y = 0, dir2X = 0, dir2Y = 0;
-              if (tile.directions && tile.directions.length >= 2) {
-                dir1X = tile.directions[0].x;
-                dir1Y = tile.directions[0].y;
-                dir2X = tile.directions[1].x;
-                dir2Y = tile.directions[1].y;
+              let bis1X = 0, bis1Y = 0, bis2X = 0, bis2Y = 0;
+              if (tile.bisectors && tile.bisectors.length >= 2) {
+                  // Rotate large angle bisector
+                  const largeBisX = tile.bisectors[0].x;
+                  const largeBisY = tile.bisectors[0].y;
+                  bis1X = largeBisX * cosRot - largeBisY * sinRot;
+                  bis1Y = largeBisX * sinRot + largeBisY * cosRot;
+                  
+                  // Rotate small angle bisector
+                  const smallBisX = tile.bisectors[1].x;
+                  const smallBisY = tile.bisectors[1].y;
+                  bis2X = smallBisX * cosRot - smallBisY * sinRot;
+                  bis2Y = smallBisX * sinRot + smallBisY * cosRot;
               }
-              
-              // Store direction vectors
-              const dirIndex = tileCount << 1; // tileCount * 2
-              dir1View[dirIndex] = dir1X;
-              dir1View[dirIndex + 1] = dir1Y;
-              dir2View[dirIndex] = dir2X;
-              dir2View[dirIndex + 1] = dir2Y;
+
+              // Store rotated bisector vectors
+              const dirIndex = tileCount << 1;
+              dir1View[dirIndex] = bis1X;
+              dir1View[dirIndex + 1] = bis1Y;
+              dir2View[dirIndex] = bis2X;
+              dir2View[dirIndex + 1] = bis2Y;
               
               tileCount++;
           }

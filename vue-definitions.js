@@ -486,7 +486,7 @@ var app = new Vue({
           const sinCosRefs = this.sinCosTable;
           const offsetsRefs = this.offsets;
           const epsilonNeg = -this.epsilon;
-          
+
           // Process each angle pair to create median points and their duals
           const angleCount = angles.length;
           for (let i = 0; i < angleCount; i++) {
@@ -495,7 +495,7 @@ var app = new Vue({
             
             // Calculate median point directly
             const xm = pt.x + epsilonNeg * 0.5 * (Math.sin(angle0) + Math.sin(angle1));
-            const ym = pt.y + this.epsilon * 0.5 * (Math.cos(angle0) + Math.cos(angle1));
+            const ym = pt.y + this.epsilon * 0.5 * (Math.cos(angle0) + Math.cos(angle1));           
             
             // Calculate dual point and accumulate for mean
             let xd = 0;
@@ -514,6 +514,53 @@ var app = new Vue({
             mean.x += xd;
             mean.y += yd;
           }
+
+          // Calculate angle bisectors for the first two intersecting lines
+          let bisectors = [];
+          if (pt.lines.length >= 2 && angles.length >= 2) {
+            // Get the angles of the first two lines
+            const angle1 = pt.lines[0].angle * this.multiplier;
+            const angle2 = pt.lines[1].angle * this.multiplier;
+            
+            // Calculate direction vectors
+            const dir1 = {
+              x: Math.cos(angle1),
+              y: Math.sin(angle1)
+            };
+            const dir2 = {
+              x: Math.cos(angle2),
+              y: Math.sin(angle2)
+            };
+            
+            // Calculate the small angle bisector (sum of unit vectors)
+            const bisectorSmall = {
+              x: dir1.x + dir2.x,
+              y: dir1.y + dir2.y
+            };
+            
+            // Normalize the small bisector
+            const smallMag = Math.sqrt(bisectorSmall.x * bisectorSmall.x + bisectorSmall.y * bisectorSmall.y);
+            if (smallMag > this.epsilon) {
+              bisectorSmall.x /= smallMag;
+              bisectorSmall.y /= smallMag;
+            }
+            
+            // Calculate the large angle bisector (perpendicular to small)
+            const bisectorLarge = {
+              x: -bisectorSmall.y,
+              y: bisectorSmall.x
+            };
+            
+            // Store bisectors in order: [large, small]
+            bisectors = [bisectorLarge, bisectorSmall];
+          }
+
+          // Ensure we always have two bisector vectors (pad with zeros if needed)
+          while (bisectors.length < 2) {
+            bisectors.push({x: 0, y: 0});
+          }
+
+          pt.bisectors = bisectors;
           
           // Finalize mean
           mean.x /= angleCount;
@@ -522,27 +569,6 @@ var app = new Vue({
           pt.numVertices = angles.length;
           pt.angles = JSON.stringify(angles);
           pt.mean = mean;
-
-          // Calculate direction vectors for the first two intersecting lines
-          let directions = [];
-          if (pt.lines.length >= 2) {
-            // Get direction vectors for the first two lines
-            for (let i = 0; i < Math.min(2, pt.lines.length); i++) {
-              const line = pt.lines[i];
-              const sc = this.sinCosTable[line.angle];
-              // Apply rotation to the direction vector
-              const dirX = sc.cos * this.sinCosRotate.cos - sc.sin * this.sinCosRotate.sin;
-              const dirY = sc.cos * this.sinCosRotate.sin + sc.sin * this.sinCosRotate.cos;
-              directions.push({x: dirX, y: dirY});
-            }
-          }
-          
-          // Ensure we always have two direction vectors (pad with zeros if needed)
-          while (directions.length < 2) {
-            directions.push({x: 0, y: 0});
-          }
-          
-          pt.directions = directions;
 
         }        
       }

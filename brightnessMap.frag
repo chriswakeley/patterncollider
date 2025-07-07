@@ -59,19 +59,12 @@ void main() {
         // Sample all textures at once
         vec2 tilePosPixels = texture2D(uTilePositions, texCoord).xy;
         float tileBrightness = texture2D(uTileData, texCoord).r;
-        vec2 direction1 = texture2D(uTileDirections1, texCoord).xy;
-        vec2 direction2 = texture2D(uTileDirections2, texCoord).xy;
-        
+        vec2 bisectorLarge = texture2D(uTileDirections1, texCoord).xy;  // Already the large angle bisector
+        vec2 bisectorSmall = texture2D(uTileDirections2, texCoord).xy;  // Already the small angle bisector
+
         // Calculate distance to tile
         float dist = distance(fragCoordPixels, tilePosPixels);
-        
-        // Calculate the two angle bisectors
-        // The sum of two unit vectors gives the bisector of the small angle
-        vec2 bisectorSmall = normalize(direction1 + direction2);
-        
-        // The perpendicular to the small angle bisector gives the large angle bisector
-        vec2 bisectorLarge = vec2(-bisectorSmall.y, bisectorSmall.x);
-        
+
         // Calculate directional alignment with bisectors
         vec2 fragToTile = normalize(tilePosPixels - fragCoordPixels);
         float alignLarge = abs(dot(fragToTile, bisectorLarge));
