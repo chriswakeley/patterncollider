@@ -698,9 +698,9 @@ var app = new Vue({
     pan: 0,
     disorder: 0,
     randomSeed: 0,
-    zoom: 1,
+    zoom: 0.63,
     rotate: 0,
-    primaryColor: '#ff0000', // Red as default primary color
+    primaryColor: '#ff8800', // Orange as default primary color
     selectedTiles: [],
     epsilon: Math.pow(10, -6),
     inverseEpsilon: Math.pow(10, 6),
@@ -711,8 +711,8 @@ var app = new Vue({
     mode: 'shape',
     fullscreen: false,
     fullscreenPossible: document.fullscreenEnabled || document.webkitFullscreenEnabled,
-    dotSizeMult: 0.003,
-    dotSizePow: 3.85,
+    dotSizeMult: 0.00005,
+    dotSizePow: 4.4,
     saveKeys: [
       'symmetry', 'steps', 'pattern', 'disorder', 'radius', 'zoom', 
       'rotate', 'randomSeed', 'pan', 
