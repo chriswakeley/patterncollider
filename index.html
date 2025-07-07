@@ -79,17 +79,14 @@
           steps: steps,
           multiplier: multiplier,
           zoom: zoom,
-          colorTiles: colorTiles,
           selectedTiles: selectedTiles,
           display: canvasDisplaySetting,
           symmetry: symmetry,
-          stroke: stroke,
-          showStroke: showStroke,
           rotate: rotate,
-          orientationColoring: orientationColoring,
           download: tilingDownloadCount,
           dotSizeMult: dotSizeMult,
-          dotSizePow: dotSizePow
+          dotSizePow: dotSizePow,
+          primaryColor: primaryColorRgb
         }"
         v-on:update:add-tile="selectedTiles = [...selectedTiles, $event]"
         v-on:update:remove-tile="selectedTiles = selectedTiles.filter(e => !(e.x == $event.x && e.y == $event.y))"
@@ -112,7 +109,7 @@
     <div class="nav">
       <div tabindex="0" role="button" @click="mode = 'shape'" :class="mode == 'shape' ? 'lightershade' : ''">Pattern</div>
       <div tabindex="0" role="button" @click="mode = 'size'" :class="mode == 'size' ? 'lightershade' : ''">Size</div>
-      <div tabindex="0" role="button" @click="mode = 'color'" :class="mode == 'color' ? 'lightershade' : ''">Color</div>
+      <div tabindex="0" role="button" @click="mode = 'appearance'" :class="mode == 'appearance' ? 'lightershade' : ''">Appearance</div>
     </div>
 
     <div v-if="mode == 'shape'" class="grid lightershade">
@@ -172,90 +169,24 @@
         <label for="zoom">Zoom</label>        
       </div>
 
+    </div>
+
+
+    <div v-if="mode == 'appearance'" class="grid lightershade">
+
       <div>
         <input class="slider" type="range" id="dotSizeMult" v-model.number="dotSizeMult" min="0.00005" max="0.005" step="0.00005"></input>
-        <label for="dotSizeMult">Dot Size Mult</label>        
+        <label for="dotSizeMult">Brightness</label>        
       </div>
 
       <div>
         <input class="slider" type="range" id="dotSizePow" v-model.number="dotSizePow" min="0" max="5" step="0.005"></input>
-        <label for="dotSizePow">Dot Size Pow</label>        
-      </div>
-
-      <div style="flex-direction: row; width: auto;">
-        <label for="show">Show</label> &nbsp;&nbsp;       
-        <select id="show" v-model="show">
-          <option>Tiling</option>
-        </select>
-      </div>
-
-    </div>
-
-
-    <div v-if="mode == 'color'" class="grid lightershade">
-
-      <div>
-        <button @click="randomizeColors" :disabled="!colorTiles">Change Color Palette</button>
+        <label for="dotSizePow">Exposure</label>        
       </div>
 
       <div>
-        <div>
-          <label for="reverseColors" :class="colorTiles ? '' : 'grey'">Reverse Colors</label>
-          <input type="checkbox" id="reverseColors" v-model="reverseColors" class="checkbox" :disabled="!colorTiles">
-        </div>
-      </div>
-
-      <div>
-        <div>
-          <label for="orientationColoring" :class="colorTiles ? '' : 'grey'">Color Using Tile Orientation</label>
-          <input type="checkbox" id="orientationColoring" v-model="orientationColoring" class="checkbox" :disabled="!colorTiles">
-        </div>
-      </div>
-      
-      <div>
-        <div>
-          <label for="colorTiles">Color Tiles</label>
-          <input type="checkbox" id="colorTiles" v-model="colorTiles" class="checkbox">
-        </div>
-      </div>
-
-      <div>
-        <div>
-          <label for="showIntersections">Intersections</label>
-          <input type="checkbox" id="showIntersections" v-model="showIntersections" class="checkbox">
-        </div>
-      </div>
-
-      <div>
-        <div>
-          <label for="showStroke" :class="colorTiles ? '' : 'grey'">Edges</label>
-          <input type="checkbox" id="showStroke" v-model="showStroke" class="checkbox" :disabled="!colorTiles">
-        </div>
-      </div>
-
-      <div>
-        <input class="slider" type="range" id="stroke" v-model.number="stroke" min="0" max="255" step="1" :disabled="!(showStroke && colorTiles)"></input>
-        <label for="stroke" :class="showStroke && colorTiles ? '' : 'grey'">Edge Brightness</label>       
-      </div>
-
-      <div>
-        <input class="slider" type="range" id="hue" v-model.number="hue" min="0" max="360" step="1" :disabled="!colorTiles"></input>
-        <label for="hue" :class="colorTiles ? '' : 'grey'">Hue</label>       
-      </div>
-
-      <div>
-        <input class="slider" type="range" id="hueRange" v-model.number="hueRange" min="-180" max="180" step="1" :disabled="!colorTiles"></input>
-        <label for="hueRange" :class="colorTiles ? '' : 'grey'">Hue Range: <span class="dotted">{{hueRange}}</span></label>       
-      </div>
-
-      <div>
-        <input class="slider" type="range" id="sat" v-model.number="sat" min="0" max="100" step="1" :disabled="!colorTiles"></input>
-        <label for="sat" :class="colorTiles ? '' : 'grey'">Saturation</label>
-      </div>
-
-      <div>
-        <input class="slider" type="range" id="contrast" v-model.number="contrast" min="0" max="50" step="1" :disabled="!colorTiles"></input>
-        <label for="contrast" :class="colorTiles ? '' : 'grey'">Contrast</label>
+        <label for="primaryColor">Primary Color</label>
+        <input type="color" id="primaryColor" v-model="primaryColor">
       </div>
 
     </div>

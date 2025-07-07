@@ -39,6 +39,7 @@ function sketch(parent) { // we pass the sketch data from the parent
     let uTileDirections2Loc;
     let uTileCountLoc;
     let uInterpolationPowerLoc;
+    let uColor1Loc;
 
     // Performance optimization variables
     let lastTileCount = -1;
@@ -46,16 +47,6 @@ function sketch(parent) { // we pass the sketch data from the parent
     let texturesDirty = false;
     let needsRedraw = true;
     let screenSizeDirty = true;
-
-    // Keep hexToRgbFloat for now, might be useful later? Or remove if unused.
-    function hexToRgbFloat(hex) {
-      var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-      return result ? [
-        parseInt(result[1], 16) / 255.0,
-        parseInt(result[2], 16) / 255.0,
-        parseInt(result[3], 16) / 255.0,
-      ] : [0, 0, 0]; 
-    }
 
     // Helper function to create a Float texture
     function createFloatTexture(width, height) {
@@ -128,8 +119,9 @@ function sketch(parent) { // we pass the sketch data from the parent
         uTileDirections2Loc = gl.getUniformLocation(program, "uTileDirections2");
         uTileCountLoc = gl.getUniformLocation(program, "uTileCount");
         uInterpolationPowerLoc = gl.getUniformLocation(program, "uInterpolationPower");
+        uColor1Loc = gl.getUniformLocation(program, "uColor1");
 
-        if (!uScreenSizeLoc || !uTilePositionsLoc || !uTileDataLoc || !uTileDirections1Loc || !uTileDirections2Loc || !uTileCountLoc || !uInterpolationPowerLoc) {
+        if (!uScreenSizeLoc || !uTilePositionsLoc || !uTileDataLoc || !uTileDirections1Loc || !uTileDirections2Loc || !uTileCountLoc || !uInterpolationPowerLoc || !uColor1Loc) {
              console.warn("Could not find one or more uniform locations. Check shader names.");
         }
     }
@@ -346,6 +338,11 @@ function sketch(parent) { // we pass the sketch data from the parent
       if (uInterpolationPowerLoc) {
            // Make this controllable via parent.data later? 
            gl.uniform1f(uInterpolationPowerLoc, 2); // Default power of 2
+      }
+      
+      // Set primary color uniform
+      if (uColor1Loc && parent.data.primaryColor) {
+           gl.uniform3fv(uColor1Loc, parent.data.primaryColor);
       }
       
       // Only update textures when data changed

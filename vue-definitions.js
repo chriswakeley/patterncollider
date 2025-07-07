@@ -84,6 +84,16 @@ var app = new Vue({
       return '#' + ((1 << 24) + (R << 16) + (G << 8) + B).toString(16).slice(1);
     },
 
+    // Convert hex color to RGB float values for shader
+    hexToRgbFloat(hex) {
+      var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return result ? [
+        parseInt(result[1], 16) / 255.0,
+        parseInt(result[2], 16) / 255.0,
+        parseInt(result[3], 16) / 255.0,
+      ] : [1.0, 0.0, 0.0]; // Default to red if parsing fails
+    },
+
     onResize() {
       this.canvas2Resized = false;
     },
@@ -108,13 +118,6 @@ var app = new Vue({
 
     resetSelection() {
       this.selectedTiles = [];
-    },
-
-    randomizeColors() {
-      this.hue = Math.round(360 * Math.random()); // 0 to 360
-      this.hueRange = Math.round(360 * Math.random()) - 180; // -180 to 180
-      this.contrast = Math.round(25 * Math.random()) + 25; // 25 to 50
-      this.sat = Math.round(40 * Math.random()) + 60; // 60 to 100
     },
 
     updateURL(queryURL) {
@@ -162,11 +165,19 @@ var app = new Vue({
 
     },
 
+    
+
     // --- Animation Methods ---
     togglePatternAnimation() {
         this.isAnimatingPattern = !this.isAnimatingPattern;
+        // In togglePatternAnimation method
         if (this.isAnimatingPattern) {
-            this.animationPatternPhase = 0; // Reset phase for consistent animation
+            // Convert current pattern to the corresponding phase
+            if (this.pattern >= 0) {
+                this.animationPatternPhase = this.pattern / 4;
+            } else {
+                this.animationPatternPhase = 1 + this.pattern / 4;
+            }
         }
         this.startOrStopMainAnimationLoop();
     },
@@ -545,13 +556,8 @@ var app = new Vue({
       return this.intersectionPoints;
     },
 
-    colors() {
-      let lightness = 50;
-
-      let start = [this.hue + this.hueRange, this.sat, lightness + this.contrast];
-      let end = [this.hue - this.hueRange, this.sat, lightness - this.contrast];
-      
-      return [start, end];
+    primaryColorRgb() {
+      return this.hexToRgbFloat(this.primaryColor);
     },
 
     canvasDisplaySetting() {
@@ -617,10 +623,6 @@ var app = new Vue({
       this.selectedTiles = [];
     },
 
-    show() {
-      this.canvas2Resized = false;
-    },
-
   },
 
   created() {
@@ -663,7 +665,7 @@ var app = new Vue({
   data: {
     dataBackup: {},
     // Add caching for intersection points
-    urlParameters: ['symmetry', 'pattern', 'pan', 'disorder', 'randomSeed', 'radius', 'zoom', 'rotate', 'colorTiles', 'showIntersections', 'stroke', 'showStroke', 'hue', 'hueRange', 'contrast', 'sat', 'reverseColors', 'orientationColoring', 'dotSizeMult', 'dotSizePow'],
+    urlParameters: ['symmetry', 'pattern', 'pan', 'disorder', 'randomSeed', 'radius', 'zoom', 'rotate', 'dotSizeMult', 'dotSizePow', 'primaryColor'],
     symmetry: 5,
     radius: 100,
     pattern: 0.2,
@@ -671,18 +673,8 @@ var app = new Vue({
     disorder: 0,
     randomSeed: 0,
     zoom: 1,
-    showIntersections: true,
-    colorTiles: true,
-    orientationColoring: false,
-    stroke: 128,
-    showStroke: false,
     rotate: 0,
-    hue: 342,
-    hueRange: 62,
-    contrast: 36,
-    sat: 74,
-    reverseColors: false,
-    show: 'Tiling',
+    primaryColor: '#ff0000', // Red as default primary color
     selectedTiles: [],
     epsilon: Math.pow(10, -6),
     inverseEpsilon: Math.pow(10, 6),
@@ -697,10 +689,8 @@ var app = new Vue({
     dotSizePow: 3.85,
     saveKeys: [
       'symmetry', 'steps', 'pattern', 'disorder', 'radius', 'zoom', 
-      'colorTiles', 'showIntersections', 'showStroke', 'stroke', 'hue', 'sat', 
-      'contrast', 'hueRange', 'reverseColors', 'rotate', 'orientationColoring',
-      'randomSeed', 'pan', 
-      'dotSizeMult', 'dotSizePow'
+      'rotate', 'randomSeed', 'pan', 
+      'dotSizeMult', 'dotSizePow', 'primaryColor'
     ],
     appDescription: 'Pattern Collider Vue App',
     isAnimatingPattern: false,

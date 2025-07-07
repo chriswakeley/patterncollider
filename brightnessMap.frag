@@ -15,6 +15,7 @@ uniform sampler2D uTileDirections2; // Second line direction vectors (RG channel
 uniform int uTileCount;
 uniform vec2 uScreenSize;
 uniform float uInterpolationPower;  // Currently unused
+uniform vec3 uColor1;               // First direction color (RGB)
 
 // Constants
 const float EPSILON = 1e-60;
@@ -64,18 +65,21 @@ void main() {
         // Calculate distance to tile
         float dist = distance(fragCoordPixels, tilePosPixels);
         
-        // Calculate directional alignment
-        vec2 fragToTile = normalize(tilePosPixels - fragCoordPixels);
-        float align1 = abs(dot(fragToTile, direction1));
-        float align2 = abs(dot(fragToTile, direction2));
+        // Calculate the two angle bisectors
+        // The sum of two unit vectors gives the bisector of the small angle
+        vec2 bisectorSmall = normalize(direction1 + direction2);
         
-        // Determine primary and secondary alignments
-        float alignment1 = max(align1, align2);
-        float alignment2 = min(align1, align2);
+        // The perpendicular to the small angle bisector gives the large angle bisector
+        vec2 bisectorLarge = vec2(-bisectorSmall.y, bisectorSmall.x);
+        
+        // Calculate directional alignment with bisectors
+        vec2 fragToTile = normalize(tilePosPixels - fragCoordPixels);
+        float alignLarge = abs(dot(fragToTile, bisectorLarge));
+        float alignSmall = abs(dot(fragToTile, bisectorSmall));
 
         // Calculate angle-based weights
-        float angleWeight1 = 1.0 + alignment1 * DIRECTION_SCALE;
-        float angleWeight2 = 1.0 + alignment2 * DIRECTION_SCALE;
+        float angleWeight1 = 1.0 + alignLarge * DIRECTION_SCALE;
+        float angleWeight2 = 1.0 + alignSmall * DIRECTION_SCALE;
         
         // Calculate distance weights with angle modulation
         float brightnessSquared = tileBrightness * tileBrightness;
@@ -102,6 +106,12 @@ void main() {
     finalBrightness1 = 1.0 - clamp(finalBrightness1 * BRIGHTNESS_SCALE, 0.0, 1.0);
     finalBrightness2 = 1.0 - clamp(finalBrightness2 * BRIGHTNESS_SCALE, 0.0, 1.0);
 
+    // Calculate complementary color (when added to uColor1 gives white)
+    vec3 color2 = vec3(1.0) - uColor1;
+    
+    // Blend the two colors based on their brightness values
+    vec3 finalColor = uColor1 * finalBrightness1 + color2 * finalBrightness2;
+
     // Output final color
-    gl_FragColor = vec4(finalBrightness1, finalBrightness2, 1.0, 1.0);
+    gl_FragColor = vec4(finalColor, 1.0);
 }
